@@ -41,6 +41,7 @@ import java.io.OutputStream;
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.ArrayDeque;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -69,6 +70,7 @@ public class MainActivity extends Activity {
     private final List<Uri> folderPdfs = new ArrayList<>();
     private final Map<Integer, float[]> manualPageRatios = new HashMap<>();
     private final Set<Integer> manualPages = new HashSet<>();
+    private final ArrayDeque<ManualSnapshot> manualUndoHistory = new ArrayDeque<>();
     private final ExecutorService sidecarExecutor = Executors.newSingleThreadExecutor();
     private int folderPdfIndex = -1;
     private Uri folderTreeUri;
@@ -78,6 +80,7 @@ public class MainActivity extends Activity {
     private TextView info;
     private TextView detectionButton;
     private TextView editButton;
+    private TextView previousButton;
     private TextView undoButton;
     private TextView clearButton;
     private LinearLayout topOverlay;
@@ -86,6 +89,9 @@ public class MainActivity extends Activity {
     private float touchX;
     private float lastTouchX;
     private float lastTouchY;
+    private int selectedManualSystemIndex = -1;
+    private int selectedManualPageIndex = -1;
+    private boolean touchStartedOnManualSystem;
     private float zoom = 1f;
     private float panX;
     private float panY;
@@ -160,6 +166,7 @@ public class MainActivity extends Activity {
             if (e.getActionMasked() == MotionEvent.ACTION_DOWN) {
                 touchX = lastTouchX = e.getX(); touchY = lastTouchY = e.getY();
                 multiTouchGesture = false;
+                touchStartedOnManualSystem = editMode && manualSystemAt(touchY) >= 0;
                 return true;
             }
             if (e.getActionMasked() == MotionEvent.ACTION_POINTER_DOWN) {
@@ -168,7 +175,7 @@ public class MainActivity extends Activity {
             }
             if (e.getActionMasked() == MotionEvent.ACTION_MOVE) {
                 if (e.getPointerCount() > 1) { multiTouchGesture = true; return true; }
-                if (editMode && zoom > 1.01f && !scaleGestureDetector.isInProgress()) {
+                if (editMode && zoom > 1.01f && !touchStartedOnManualSystem && !scaleGestureDetector.isInProgress()) {
                     panX += e.getX() - lastTouchX;
                     panY += e.getY() - lastTouchY;
                     clampImagePan();
@@ -180,9 +187,15 @@ public class MainActivity extends Activity {
             if (e.getActionMasked() == MotionEvent.ACTION_UP) {
                 float dx = e.getX() - touchX, dy = e.getY() - touchY;
                 if (editMode) {
-                    if (multiTouchGesture || (zoom > 1.01f && Math.hypot(dx, dy) > dp(8))) return true;
-                    if (Math.abs(dx) < dp(16) && Math.abs(dy) < dp(16)) toggleControls();
-                    else addManualSystemFromDrag(touchY, e.getY());
+                    if (multiTouchGesture || (zoom > 1.01f && !touchStartedOnManualSystem && Math.hypot(dx, dy) > dp(8))) return true;
+                    if (Math.abs(dx) < dp(16) && Math.abs(dy) < dp(16)) {
+                        int selected = manualSystemAt(touchY);
+                        if (selected >= 0) {
+                            selectedManualSystemIndex = selected; selectedManualPageIndex = pageIndex;
+                            showControls(); renderSystem();
+                        }
+                        else toggleControls();
+                    } else editOrAddManualSystem(touchY, e.getY());
                     return true;
                 }
                 if (Math.abs(dx) > Math.max(dp(48), v.getWidth() * .12f) && Math.abs(dx) > Math.abs(dy)) {
@@ -209,15 +222,15 @@ public class MainActivity extends Activity {
         LinearLayout tools = new LinearLayout(this); tools.setGravity(Gravity.CENTER_VERTICAL);
         TextView open = button("Öffnen", this::chooseSource);
         detectionButton = button("Auto an", this::toggleDetection);
-        TextView previous = button("‹", this::previous); previous.setContentDescription("Zurück");
+        previousButton = button("‹", this::previous); previousButton.setContentDescription("Zurück");
         TextView next = button("›", this::next); next.setContentDescription("Weiter");
         editButton = button("Bearb.", this::toggleEditMode);
-        undoButton = button("↶", this::undoManualSystem); undoButton.setContentDescription("Letztes System entfernen");
+        undoButton = button("↶", this::undoManualSystem); undoButton.setContentDescription("Ausgewähltes System entfernen");
         clearButton = button("×", this::clearManualSystems); clearButton.setContentDescription("Systeme dieser Seite löschen");
         undoButton.setVisibility(View.GONE); clearButton.setVisibility(View.GONE);
-        previous.setTextSize(22); next.setTextSize(22);
-        previous.setPadding(dp(4), dp(10), dp(4), dp(10)); next.setPadding(dp(4), dp(10), dp(4), dp(10));
-        addTool(tools, open); addTool(tools, previous); addTool(tools, detectionButton); addTool(tools, next);
+        previousButton.setTextSize(22); next.setTextSize(22);
+        previousButton.setPadding(dp(4), dp(10), dp(4), dp(10)); next.setPadding(dp(4), dp(10), dp(4), dp(10));
+        addTool(tools, open); addTool(tools, previousButton); addTool(tools, detectionButton); addTool(tools, next);
         addTool(tools, editButton); addTool(tools, undoButton); addTool(tools, clearButton);
         topOverlay.addView(tools, new LinearLayout.LayoutParams(-2, -2));
         FrameLayout.LayoutParams topParams = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.LEFT);
@@ -475,6 +488,7 @@ public class MainActivity extends Activity {
                 for (int i = 0; i < renderer.getPageCount(); i++) pageSystems.add(null);
                 manualPageRatios.clear(); manualPageRatios.putAll(loadedSidecar);
                 manualPages.clear(); manualPages.addAll(loadedSidecar.keySet());
+                manualUndoHistory.clear(); selectedManualSystemIndex = -1; selectedManualPageIndex = -1;
                 if (startAtLastPage && autoDetection) {
                     int lastScorePage = findScorePage(pageIndex, -1);
                     if (lastScorePage >= 0) pageIndex = lastScorePage;
@@ -539,12 +553,13 @@ public class MainActivity extends Activity {
         zoom = 1f; panX = 0f; panY = 0f;
         detectionButton.setText(autoDetection ? "Auto an" : "Auto aus");
         editButton.setText(editMode ? "Fertig" : "Bearb.");
+        previousButton.setContentDescription(editMode ? "Letzte Bearbeitung rückgängig machen" : "Zurück zum vorherigen System");
         undoButton.setVisibility(editMode ? View.VISIBLE : View.GONE);
         clearButton.setVisibility(editMode ? View.VISIBLE : View.GONE);
         systemIndex = 0;
         if (editMode) {
             ensureManualPage(pageIndex, Math.max(scoreView.getWidth(), 1200));
-            Toast.makeText(this, "Ziehe über jedes Notensystem, um es zu markieren", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "Ziehen markiert, verschiebt oder ändert ein System", Toast.LENGTH_LONG).show();
         }
         renderSystem();
     }
@@ -564,11 +579,58 @@ public class MainActivity extends Activity {
         pageSystems.set(page, new PageSystems(new int[0], new int[0]));
     }
 
-    private void addManualSystemFromDrag(float startY, float endY) {
+    private float manualRatioFromScreenY(float y, int pageHeight) {
+        float scale = baseImageScale() * zoom;
+        float imageTop = (scoreView.getHeight() - pageHeight * scale) / 2f + panY;
+        return Math.max(0f, Math.min(1f, (y - imageTop) / (pageHeight * scale)));
+    }
+
+    private int manualSystemAt(float screenY) {
+        float[] ratios = manualPageRatios.get(pageIndex);
+        if (!editMode || ratios == null || scoreView == null || scoreView.getDrawable() == null) return -1;
+        int height = pageBitmapHeight(pageIndex, Math.max(scoreView.getWidth(), 1200));
+        float ratio = manualRatioFromScreenY(screenY, height);
+        for (int i = 0; i + 1 < ratios.length; i += 2)
+            if (ratio >= ratios[i] && ratio <= ratios[i + 1]) return i / 2;
+        return -1;
+    }
+
+    private void editOrAddManualSystem(float startY, float endY) {
         int width = Math.max(scoreView.getWidth(), 1200);
         int pageHeight = pageBitmapHeight(pageIndex, width);
         float scale = baseImageScale() * zoom;
         float imageTop = (scoreView.getHeight() - pageHeight * baseImageScale() * zoom) / 2f + panY;
+        float startRatio = manualRatioFromScreenY(startY, pageHeight);
+        float endRatio = manualRatioFromScreenY(endY, pageHeight);
+        ArrayList<float[]> ranges = manualRanges(pageIndex);
+        int existing = -1;
+        for (int i = 0; i < ranges.size(); i++) {
+            float[] range = ranges.get(i);
+            if (startRatio >= range[0] && startRatio <= range[1]) { existing = i; break; }
+        }
+        if (existing >= 0) {
+            pushManualUndoSnapshot(pageIndex);
+            float[] range = ranges.get(existing);
+            float edgeTolerance = dp(30) / (pageHeight * scale);
+            if (Math.abs(startRatio - range[0]) <= edgeTolerance) {
+                range[0] = Math.min(endRatio, range[1] - .005f);
+            } else if (Math.abs(startRatio - range[1]) <= edgeTolerance) {
+                range[1] = Math.min(1f, Math.max(endRatio, range[0] + .005f));
+            } else {
+                float height = range[1] - range[0];
+                float delta = endRatio - startRatio;
+                range[0] = Math.max(0f, Math.min(1f - height, range[0] + delta));
+                range[1] = range[0] + height;
+            }
+            float[] edited = range;
+            ranges.sort(Comparator.comparingDouble(value -> value[0]));
+            selectedManualSystemIndex = ranges.indexOf(edited);
+            selectedManualPageIndex = pageIndex;
+            setManualRanges(pageIndex, ranges, width);
+            saveManualSidecarAsync();
+            renderSystem();
+            return;
+        }
         int top = Math.max(0, Math.min(pageHeight, Math.round((Math.min(startY, endY) - imageTop) / scale)));
         int bottom = Math.max(0, Math.min(pageHeight, Math.round((Math.max(startY, endY) - imageTop) / scale)));
         if (bottom - top < Math.max(dp(18) / scale, pageHeight * .01f)) {
@@ -576,9 +638,12 @@ public class MainActivity extends Activity {
             return;
         }
         ensureManualPage(pageIndex, width);
-        ArrayList<float[]> ranges = manualRanges(pageIndex);
-        ranges.add(new float[]{top / (float) pageHeight, bottom / (float) pageHeight});
+        pushManualUndoSnapshot(pageIndex);
+        float[] added = new float[]{top / (float) pageHeight, bottom / (float) pageHeight};
+        ranges.add(added);
         ranges.sort(Comparator.comparingDouble(range -> range[0]));
+        selectedManualSystemIndex = ranges.indexOf(added);
+        selectedManualPageIndex = pageIndex;
         setManualRanges(pageIndex, ranges, width);
         saveManualSidecarAsync();
         renderSystem();
@@ -616,15 +681,41 @@ public class MainActivity extends Activity {
     private void undoManualSystem() {
         ArrayList<float[]> ranges = manualRanges(pageIndex);
         if (ranges.isEmpty()) return;
-        ranges.remove(ranges.size() - 1);
+        int remove = selectedManualPageIndex == pageIndex && selectedManualSystemIndex >= 0 && selectedManualSystemIndex < ranges.size()
+                ? selectedManualSystemIndex : ranges.size() - 1;
+        pushManualUndoSnapshot(pageIndex);
+        ranges.remove(remove);
+        selectedManualSystemIndex = -1; selectedManualPageIndex = -1;
         setManualRanges(pageIndex, ranges, Math.max(scoreView.getWidth(), 1200));
+        saveManualSidecarAsync();
+        renderSystem();
+    }
+
+    private void pushManualUndoSnapshot(int page) {
+        float[] current = manualPageRatios.get(page);
+        manualUndoHistory.addLast(new ManualSnapshot(page, current == null ? new float[0] : current.clone()));
+        while (manualUndoHistory.size() > 50) manualUndoHistory.removeFirst();
+    }
+
+    private void undoManualEdit() {
+        ManualSnapshot snapshot = manualUndoHistory.pollLast();
+        if (snapshot == null) {
+            Toast.makeText(this, "Keine Bearbeitung zum Rückgängigmachen", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        manualPages.add(snapshot.page);
+        manualPageRatios.put(snapshot.page, snapshot.ratios.clone());
+        pageSystems.set(snapshot.page, pageSystemsFromRatios(snapshot.page, Math.max(scoreView.getWidth(), 1200), snapshot.ratios));
+        if (snapshot.page == pageIndex) { selectedManualSystemIndex = -1; selectedManualPageIndex = -1; }
         saveManualSidecarAsync();
         renderSystem();
     }
 
     private void clearManualSystems() {
         ensureManualPage(pageIndex, Math.max(scoreView.getWidth(), 1200));
+        if (!manualRanges(pageIndex).isEmpty()) pushManualUndoSnapshot(pageIndex);
         setManualRanges(pageIndex, new ArrayList<>(), Math.max(scoreView.getWidth(), 1200));
+        selectedManualSystemIndex = -1; selectedManualPageIndex = -1;
         saveManualSidecarAsync();
         renderSystem();
     }
@@ -689,6 +780,7 @@ public class MainActivity extends Activity {
     }
 
     private void previous() {
+        if (editMode) { undoManualEdit(); return; }
         if (renderer == null) { pickPdf(); return; }
         if (autoDetection && systemIndex > 0) {
             systemIndex--;
@@ -751,6 +843,16 @@ public class MainActivity extends Activity {
         for (int i = 0; i + 1 < ratios.length; i += 2) {
             float top = ratios[i] * bitmap.getHeight(), bottom = ratios[i + 1] * bitmap.getHeight();
             RectF area = new RectF(0, top, bitmap.getWidth(), bottom);
+            boolean selected = selectedManualPageIndex == page && selectedManualSystemIndex == i / 2;
+            if (selected) {
+                fill.setColor(Color.argb(75, 230, 146, 24));
+                edge.setColor(Color.argb(240, 230, 146, 24));
+                badge.setColor(Color.argb(220, 184, 105, 0));
+            } else {
+                fill.setColor(Color.argb(58, 20, 112, 196));
+                edge.setColor(Color.argb(220, 20, 112, 196));
+                badge.setColor(Color.argb(210, 20, 112, 196));
+            }
             canvas.drawRect(area, fill); canvas.drawRect(area, edge);
             float baseline = Math.min(bitmap.getHeight() - 4, top + Math.max(22f, bitmap.getWidth() / 35f));
             float badgeWidth = Math.max(bitmap.getWidth() / 30f, text.measureText("System " + (i / 2 + 1)) + 20f);
@@ -1085,6 +1187,12 @@ public class MainActivity extends Activity {
         final int[] top, bottom;
         PageSystems(int[] top, int[] bottom) { this.top = top; this.bottom = bottom; }
         int count() { return top.length; }
+    }
+
+    private static class ManualSnapshot {
+        final int page;
+        final float[] ratios;
+        ManualSnapshot(int page, float[] ratios) { this.page = page; this.ratios = ratios; }
     }
 
     private static class SystemRef {
