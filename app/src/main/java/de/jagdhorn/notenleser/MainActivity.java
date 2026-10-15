@@ -117,8 +117,9 @@ public class MainActivity extends Activity {
         topOverlay.setPadding(dp(12), dp(8), dp(12), dp(8)); topOverlay.setBackground(panelBackground());
         info = new TextView(this); info.setTextColor(Color.WHITE); info.setTextSize(14);
         info.setMaxLines(2); info.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        info.setMaxWidth(dp(330));
         info.setGravity(Gravity.CENTER_VERTICAL); info.setPadding(dp(4), dp(2), dp(4), dp(6));
-        topOverlay.addView(info, new LinearLayout.LayoutParams(-1, -2));
+        topOverlay.addView(info, new LinearLayout.LayoutParams(-2, -2));
         LinearLayout tools = new LinearLayout(this); tools.setGravity(Gravity.CENTER_VERTICAL);
         TextView open = button("Öffnen", this::chooseSource);
         TextView minus = button("−", () -> changeSystemCount(-1));
@@ -128,18 +129,18 @@ public class MainActivity extends Activity {
         TextView next = button("›", this::next); next.setContentDescription("Nächstes System");
         previous.setTextSize(22); next.setTextSize(22);
         previous.setPadding(dp(4), dp(10), dp(4), dp(10)); next.setPadding(dp(4), dp(10), dp(4), dp(10));
-        addTool(tools, open, 1.15f); addTool(tools, previous, .5f); addTool(tools, minus, .45f);
-        addTool(tools, detectionButton, .9f); addTool(tools, plus, .45f); addTool(tools, next, .5f);
-        topOverlay.addView(tools, new LinearLayout.LayoutParams(-1, -2));
-        FrameLayout.LayoutParams topParams = new FrameLayout.LayoutParams(-1, -2, Gravity.TOP | Gravity.CENTER_HORIZONTAL);
-        topParams.setMargins(dp(10), dp(12), dp(10), 0);
+        addTool(tools, open); addTool(tools, previous); addTool(tools, minus);
+        addTool(tools, detectionButton); addTool(tools, plus); addTool(tools, next);
+        topOverlay.addView(tools, new LinearLayout.LayoutParams(-2, -2));
+        FrameLayout.LayoutParams topParams = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.LEFT);
+        topParams.setMargins(dp(10), dp(12), 0, 0);
         root.addView(topOverlay, topParams);
 
         setContentView(root); refreshInfo(); showControls();
     }
 
-    private void addTool(LinearLayout row, View child, float weight) {
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, -2, weight);
+    private void addTool(LinearLayout row, View child) {
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
         lp.setMargins(dp(3), 0, dp(3), 0); row.addView(child, lp);
     }
 
@@ -561,41 +562,43 @@ public class MainActivity extends Activity {
         return systems == null || systems.count() == 0 ? systemsPerPage : systems.count();
     }
 
-    /** Finds sets of five long horizontal staff lines, then combines nearby staves into systems. */
+    /** Finds five-line staves while compensating for slight scan skew, then combines voices. */
     private PageSystems detectSystems(Bitmap image) {
         int width = image.getWidth(), height = image.getHeight();
         int left = width / 20, right = width * 19 / 20;
-        int scanWidth = right - left;
+        int sampleStep = Math.max(2, (right - left + 399) / 400);
+        int sampleColumns = (right - left + sampleStep - 1) / sampleStep;
         int[] pixels = new int[width * height];
         image.getPixels(pixels, 0, width, 0, 0, width, height);
-        ArrayList<Integer> rows = new ArrayList<>();
-        for (int y = 0; y < height; y++) {
-            int dark = 0, offset = y * width;
-            for (int x = left; x < right; x++) {
-                int c = pixels[offset + x];
-                int luminance = (Color.red(c) * 299 + Color.green(c) * 587 + Color.blue(c) * 114) / 1000;
-                if (luminance < 135) dark++;
+        int darkCount = 0;
+        for (int x = left; x < right; x += sampleStep) {
+            for (int y = 0, offset = x; y < height; y++, offset += width) {
+                int color = pixels[offset];
+                int luminance = (Color.red(color) * 299 + Color.green(color) * 587 + Color.blue(color) * 114) / 1000;
+                if (luminance < 160) darkCount++;
             }
-            if (dark >= scanWidth * 0.52f) rows.add(y);
         }
-        ArrayList<Integer> lines = new ArrayList<>();
-        for (int i = 0; i < rows.size();) {
-            int start = rows.get(i), end = start, j = i + 1;
-            while (j < rows.size() && rows.get(j) <= end + 2) end = rows.get(j++);
-            lines.add((start + end) / 2);
-            i = j;
+        int[] darkX = new int[darkCount], darkY = new int[darkCount];
+        int point = 0;
+        for (int x = left; x < right; x += sampleStep) {
+            for (int y = 0, offset = x; y < height; y++, offset += width) {
+                int color = pixels[offset];
+                int luminance = (Color.red(color) * 299 + Color.green(color) * 587 + Color.blue(color) * 114) / 1000;
+                if (luminance < 160) { darkX[point] = x; darkY[point] = y; point++; }
+            }
         }
         ArrayList<Staff> staffs = new ArrayList<>();
-        int maxSpacing = Math.max(8, height / 30);
-        for (int i = 0; i + 4 < lines.size();) {
-            int a = lines.get(i), b = lines.get(i + 1), c = lines.get(i + 2), d = lines.get(i + 3), e = lines.get(i + 4);
-            int s1 = b - a, s2 = c - b, s3 = d - c, s4 = e - d;
-            int spacing = (e - a) / 4;
-            boolean regular = spacing >= 3 && spacing <= maxSpacing &&
-                    Math.abs(s1 - spacing) <= spacing * .35f && Math.abs(s2 - spacing) <= spacing * .35f &&
-                    Math.abs(s3 - spacing) <= spacing * .35f && Math.abs(s4 - spacing) <= spacing * .35f;
-            if (regular) { staffs.add(new Staff(a, e, spacing)); i += 5; }
-            else i++;
+        float bestSlope = 0;
+        for (int step = -12; step <= 12; step++) {
+            float slope = step * .003f;
+            ArrayList<Staff> candidate = detectStaffsAtSlope(darkX, darkY, width, height, sampleColumns, slope);
+            if (candidate.size() > staffs.size()) { staffs = candidate; bestSlope = slope; }
+        }
+        float coarseBestSlope = bestSlope;
+        for (int step = -6; step <= 6; step++) {
+            float slope = coarseBestSlope + step * .0005f;
+            ArrayList<Staff> candidate = detectStaffsAtSlope(darkX, darkY, width, height, sampleColumns, slope);
+            if (candidate.size() > staffs.size()) staffs = candidate;
         }
         if (staffs.isEmpty()) return new PageSystems(new int[0], new int[0]);
         ArrayList<Float> gapRatios = new ArrayList<>();
@@ -606,15 +609,8 @@ public class MainActivity extends Activity {
         float systemGap = 6.0f;
         if (gapRatios.size() >= 2) {
             Collections.sort(gapRatios);
-            float largestGap = 0;
-            int split = -1;
-            for (int i = 0; i + 1 < gapRatios.size(); i++) {
-                float difference = gapRatios.get(i + 1) - gapRatios.get(i);
-                if (difference > largestGap) { largestGap = difference; split = i; }
-            }
-            // A clear page-wide gap separates adjacent voices from the whitespace between systems.
-            if (split >= 0 && largestGap >= 2.0f)
-                systemGap = (gapRatios.get(split) + gapRatios.get(split + 1)) / 2.0f;
+            float typicalGap = gapRatios.get((gapRatios.size() - 1) / 2);
+            systemGap = Math.max(6.0f, typicalGap * 1.6f);
         }
         ArrayList<Integer> tops = new ArrayList<>(), bottoms = new ArrayList<>();
         Staff first = staffs.get(0), last = first;
@@ -633,6 +629,44 @@ public class MainActivity extends Activity {
         int[] top = new int[tops.size()], bottom = new int[bottoms.size()];
         for (int i = 0; i < top.length; i++) { top[i] = tops.get(i); bottom[i] = bottoms.get(i); }
         return new PageSystems(top, bottom);
+    }
+
+    private ArrayList<Staff> detectStaffsAtSlope(int[] darkX, int[] darkY, int width, int height,
+                                                 int sampleColumns, float slope) {
+        int[] votes = new int[height];
+        float centerX = width / 2f;
+        for (int i = 0; i < darkX.length; i++) {
+            int row = Math.round(darkY[i] - slope * (darkX[i] - centerX));
+            if (row >= 0 && row < height) votes[row]++;
+        }
+        ArrayList<Integer> lines = new ArrayList<>();
+        int rowStart = -1, lastHit = -1;
+        float threshold = sampleColumns * .55f;
+        for (int y = 0; y < height; y++) {
+            int nearbyVotes = votes[y] + (y > 0 ? votes[y - 1] : 0) + (y + 1 < height ? votes[y + 1] : 0);
+            if (nearbyVotes >= threshold) {
+                if (rowStart < 0) rowStart = y;
+                else if (y > lastHit + 2) {
+                    lines.add((rowStart + lastHit) / 2);
+                    rowStart = y;
+                }
+                lastHit = y;
+            }
+        }
+        if (rowStart >= 0) lines.add((rowStart + lastHit) / 2);
+
+        ArrayList<Staff> staffs = new ArrayList<>();
+        int maxSpacing = Math.max(8, height / 30);
+        for (int i = 0; i + 4 < lines.size();) {
+            int a = lines.get(i), b = lines.get(i + 1), c = lines.get(i + 2), d = lines.get(i + 3), e = lines.get(i + 4);
+            int spacing = (e - a) / 4;
+            boolean regular = spacing >= 3 && spacing <= maxSpacing &&
+                    Math.abs((b - a) - spacing) <= spacing * .35f && Math.abs((c - b) - spacing) <= spacing * .35f &&
+                    Math.abs((d - c) - spacing) <= spacing * .35f && Math.abs((e - d) - spacing) <= spacing * .35f;
+            if (regular) { staffs.add(new Staff(a, e, spacing)); i += 5; }
+            else i++;
+        }
+        return staffs;
     }
 
     private static class Staff {
