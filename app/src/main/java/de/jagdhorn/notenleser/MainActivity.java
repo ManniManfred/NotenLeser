@@ -54,7 +54,6 @@ public class MainActivity extends Activity {
     private TextView info;
     private TextView detectionButton;
     private LinearLayout topOverlay;
-    private LinearLayout bottomOverlay;
     private String displayName = "Keine Noten geöffnet";
     private float touchY;
     private float touchX;
@@ -81,8 +80,8 @@ public class MainActivity extends Activity {
         b.setGravity(Gravity.CENTER); b.setSingleLine(true);
         b.setPadding(dp(12), dp(10), dp(12), dp(10)); b.setMinHeight(dp(44));
         GradientDrawable shape = new GradientDrawable();
-        shape.setColor(Color.rgb(54, 61, 72)); shape.setCornerRadius(dp(18));
-        shape.setStroke(dp(1), Color.argb(90, 255, 255, 255));
+        shape.setColor(Color.argb(96, 54, 61, 72)); shape.setCornerRadius(dp(18));
+        shape.setStroke(dp(1), Color.argb(70, 255, 255, 255));
         b.setBackground(shape); b.setElevation(dp(3));
         b.setOnClickListener(v -> { showControls(); action.run(); });
         return b;
@@ -119,21 +118,17 @@ public class MainActivity extends Activity {
         TextView minus = button("−", () -> changeSystemCount(-1));
         detectionButton = button("Auto an", this::toggleDetection);
         TextView plus = button("+", () -> changeSystemCount(1));
-        addTool(tools, open, 1.25f); addTool(tools, minus, .55f);
-        addTool(tools, detectionButton, 1.0f); addTool(tools, plus, .55f);
+        TextView previous = button("‹", this::previous); previous.setContentDescription("Vorheriges System");
+        TextView next = button("›", this::next); next.setContentDescription("Nächstes System");
+        previous.setTextSize(22); next.setTextSize(22);
+        previous.setPadding(dp(4), dp(10), dp(4), dp(10)); next.setPadding(dp(4), dp(10), dp(4), dp(10));
+        addTool(tools, open, 1.15f); addTool(tools, previous, .5f); addTool(tools, minus, .45f);
+        addTool(tools, detectionButton, .9f); addTool(tools, plus, .45f); addTool(tools, next, .5f);
         topOverlay.addView(tools, new LinearLayout.LayoutParams(-1, -2));
         FrameLayout.LayoutParams topParams = new FrameLayout.LayoutParams(-1, -2, Gravity.TOP | Gravity.CENTER_HORIZONTAL);
         topParams.setMargins(dp(10), dp(12), dp(10), 0);
         root.addView(topOverlay, topParams);
 
-        bottomOverlay = new LinearLayout(this); bottomOverlay.setGravity(Gravity.CENTER);
-        bottomOverlay.setPadding(dp(8), dp(6), dp(8), dp(6)); bottomOverlay.setBackground(panelBackground());
-        TextView previous = button("‹   Zurück", this::previous);
-        TextView next = button("Weiter   ›", this::next);
-        addTool(bottomOverlay, previous, 1); addTool(bottomOverlay, next, 1);
-        FrameLayout.LayoutParams bottomParams = new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
-        bottomParams.setMargins(dp(10), 0, dp(10), dp(12));
-        root.addView(bottomOverlay, bottomParams);
         setContentView(root); refreshInfo(); showControls();
     }
 
@@ -144,26 +139,22 @@ public class MainActivity extends Activity {
 
     private GradientDrawable panelBackground() {
         GradientDrawable bg = new GradientDrawable();
-        bg.setColor(Color.argb(220, 24, 28, 34)); bg.setCornerRadius(dp(22));
-        bg.setStroke(dp(1), Color.argb(75, 255, 255, 255)); return bg;
+        bg.setColor(Color.argb(78, 24, 28, 34)); bg.setCornerRadius(dp(22));
+        bg.setStroke(dp(1), Color.argb(45, 255, 255, 255)); return bg;
     }
 
     private int dp(float value) { return Math.round(value * getResources().getDisplayMetrics().density); }
 
     private void showControls() {
-        if (topOverlay == null || bottomOverlay == null) return;
+        if (topOverlay == null) return;
         uiHandler.removeCallbacks(hideControlsTask);
-        for (View view : new View[]{topOverlay, bottomOverlay}) {
-            view.setVisibility(View.VISIBLE); view.animate().cancel(); view.setAlpha(1f);
-        }
+        topOverlay.setVisibility(View.VISIBLE); topOverlay.animate().cancel(); topOverlay.setAlpha(1f);
         uiHandler.postDelayed(hideControlsTask, 3500);
     }
 
     private void hideControls() {
-        if (topOverlay == null || bottomOverlay == null) return;
-        for (View view : new View[]{topOverlay, bottomOverlay}) {
-            view.animate().alpha(0f).setDuration(350).withEndAction(() -> view.setVisibility(View.INVISIBLE));
-        }
+        if (topOverlay == null) return;
+        topOverlay.animate().alpha(0f).setDuration(350).withEndAction(() -> topOverlay.setVisibility(View.INVISIBLE));
     }
 
     private void toggleControls() {
