@@ -69,8 +69,14 @@ public class MainActivity extends Activity {
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         immersive();
         buildUi();
-        String saved = getPreferences(MODE_PRIVATE).getString("pdf", null);
-        if (saved != null) openPdf(Uri.parse(saved));
+        String savedFolder = getPreferences(MODE_PRIVATE).getString("folder_tree", null);
+        if (savedFolder != null) {
+            Uri tree = Uri.parse(savedFolder);
+            new Thread(() -> loadFolderPdfs(tree), "notenleser-folder-loader").start();
+        } else {
+            String saved = getPreferences(MODE_PRIVATE).getString("pdf", null);
+            if (saved != null) openPdf(Uri.parse(saved));
+        }
     }
 
     private void immersive() {
@@ -195,6 +201,8 @@ public class MainActivity extends Activity {
         if (request == PICK_FOLDER && result == RESULT_OK && data != null && data.getData() != null) {
             Uri tree = data.getData();
             try { getContentResolver().takePersistableUriPermission(tree, Intent.FLAG_GRANT_READ_URI_PERMISSION); } catch (Exception ignored) { }
+            getPreferences(MODE_PRIVATE).edit().putString("folder_tree", tree.toString()).remove("pdf").apply();
+            folderPdfs.clear(); folderPdfIndex = -1;
             new Thread(() -> loadFolderPdfs(tree), "notenleser-folder-loader").start();
             return;
         }
@@ -202,6 +210,7 @@ public class MainActivity extends Activity {
             Uri u = data.getData();
             try { getContentResolver().takePersistableUriPermission(u, Intent.FLAG_GRANT_READ_URI_PERMISSION); } catch (Exception ignored) { }
             folderPdfs.clear(); folderPdfIndex = -1;
+            getPreferences(MODE_PRIVATE).edit().remove("folder_tree").apply();
             openPdf(u);
         }
     }
@@ -235,8 +244,15 @@ public class MainActivity extends Activity {
                     Toast.makeText(this, "In diesem Ordner wurden keine PDFs gefunden", Toast.LENGTH_LONG).show();
                     return;
                 }
-                folderPdfs.clear(); folderPdfs.addAll(found); folderPdfIndex = 0;
-                openPdf(folderPdfs.get(0));
+                folderPdfs.clear(); folderPdfs.addAll(found);
+                String savedPdf = getPreferences(MODE_PRIVATE).getString("pdf", null);
+                folderPdfIndex = 0;
+                if (savedPdf != null) {
+                    for (int i = 0; i < folderPdfs.size(); i++) {
+                        if (folderPdfs.get(i).toString().equals(savedPdf)) { folderPdfIndex = i; break; }
+                    }
+                }
+                openPdf(folderPdfs.get(folderPdfIndex));
                 Toast.makeText(this, found.size() + " PDFs im Ordner gefunden", Toast.LENGTH_SHORT).show();
             });
         } catch (Exception e) {
