@@ -11,8 +11,8 @@ Native Android-App zum Lesen von PDF-Noten im Vollbild. Das PDF wird über den A
 - Tippen auf „PDF öffnen“, um eine Notendatei auszuwählen.
 - Wischen nach links/rechts oder die Tasten „Weiter“/„Zurück“ wechseln das System. Am Seitenende springt die App auf die nächste PDF-Seite.
 - Die App sucht automatisch nach fünf langen, waagerechten Notenlinien und navigiert zwischen erkannten Systemen.
-- Wenn der Bildschirm Platz bietet, werden mehrere aufeinanderfolgende Systeme gleichzeitig angezeigt; Navigation verschiebt den sichtbaren Ausschnitt jeweils um ein System.
-- Angezeigte Systeme sind mit Nummern markiert und durch dezente Linien getrennt. Die Seitenanzeige zeigt aktuelle und gesamte Seitenzahl.
+- Wenn der Bildschirm Platz bietet, werden mehrere aufeinanderfolgende Systeme gleichzeitig angezeigt, auch über Seitengrenzen hinweg. Navigation verschiebt den sichtbaren Ausschnitt jeweils um ein System.
+- Angezeigte Systeme sind mit Seiten- und Systemnummer im Format „Seite·System“ markiert und durch dezente Linien getrennt. Die Statuszeile zeigt aktuelle und gesamte Seitenzahl.
 - PDF-Seiten ohne erkannte Notensysteme (zum Beispiel Deckblätter) werden bei aktivierter Auto-Erkennung beim Blättern übersprungen.
 - Über „Auto“ kann auf manuelle Seiteneinteilung umgeschaltet werden. Dann lässt sich die Zahl der Abschnitte mit −/+ einstellen (1 bis 12; Standard 4).
 

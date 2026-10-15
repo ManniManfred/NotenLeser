@@ -7,6 +7,7 @@ import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
+import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.pdf.PdfRenderer;
@@ -316,71 +317,166 @@ public class MainActivity extends Activity {
         if (renderer == null) return -1;
         int width = Math.max(scoreView.getWidth(), 1200);
         for (int i = startPage; i >= 0 && i < renderer.getPageCount(); i += direction) {
-            PageSystems systems = pageSystems.get(i);
-            if (systems == null) {
-                PdfRenderer.Page page = renderer.openPage(i);
-                try {
-                    int height = Math.max(1, Math.round(width * page.getHeight() / (float) page.getWidth()));
-                    Bitmap bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
-                    bitmap.eraseColor(Color.WHITE);
-                    page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY);
-                    systems = detectSystems(bitmap);
-                    pageSystems.set(i, systems);
-                    bitmap.recycle();
-                } finally { page.close(); }
-            }
+            PageSystems systems = getPageSystems(i, width);
             if (systems.count() > 0) return i;
         }
         return -1;
+    }
+
+    private PageSystems getPageSystems(int pageIndex, int width) {
+        PageSystems systems = pageSystems.get(pageIndex);
+        if (systems != null) return systems;
+        Bitmap bitmap = renderPageBitmap(pageIndex, width);
+        systems = detectSystems(bitmap);
+        bitmap.recycle();
+        pageSystems.set(pageIndex, systems);
+        return systems;
+    }
+
+    private Bitmap renderPageBitmap(int pageIndex, int width) {
+        PdfRenderer.Page page = renderer.openPage(pageIndex);
+        try {
+            int height = Math.max(1, Math.round(width * page.getHeight() / (float) page.getWidth()));
+            Bitmap bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+            bitmap.eraseColor(Color.WHITE);
+            page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY);
+            return bitmap;
+        } finally { page.close(); }
     }
 
     private void renderSystem() {
         refreshInfo();
         if (renderer == null || scoreView == null) return;
         if (scoreView.getWidth() < 1 || scoreView.getHeight() < 1) { scoreView.post(this::renderSystem); return; }
-        PdfRenderer.Page page = renderer.openPage(pageIndex);
-        boolean pageClosed = false;
         try {
             int width = Math.max(scoreView.getWidth(), 1200);
-            int height = Math.max(1, Math.round(width * page.getHeight() / (float) page.getWidth()));
-            Bitmap whole = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
-            whole.eraseColor(Color.WHITE);
-            page.render(whole, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY);
-            PageSystems detected = pageSystems.get(pageIndex);
-            if (detected == null) {
-                detected = detectSystems(whole);
-                pageSystems.set(pageIndex, detected);
-            }
+            PageSystems detected = getPageSystems(pageIndex, width);
             if (autoDetection && detected.count() == 0 && pageIndex + 1 < renderer.getPageCount()) {
-                page.close(); pageClosed = true;
                 int nextScorePage = findScorePage(pageIndex + 1, 1);
                 if (nextScorePage >= 0) {
-                    whole.recycle(); pageIndex = nextScorePage; systemIndex = 0;
+                    pageIndex = nextScorePage; systemIndex = 0;
                     renderSystem();
                     return;
                 }
             }
-            int count = autoDetection && detected.count() > 0 ? detected.count() : systemsPerPage;
+            int count = systemCount(pageIndex, detected);
             systemIndex = Math.min(systemIndex, count - 1);
-            refreshInfo();
-            boolean useDetection = autoDetection && detected.count() > 0;
-            int top = systemTop(systemIndex, height, count, detected, useDetection);
-            int lastSystem = systemIndex;
-            int bottom = systemBottom(lastSystem, height, count, detected, useDetection);
+            SystemRef current = systemRef(pageIndex, systemIndex, width);
+            if (current == null) return;
+            ArrayList<SystemRef> before = new ArrayList<>(), after = new ArrayList<>();
             int maxCropHeight = Math.round(scoreView.getHeight() * (width / (float) scoreView.getWidth()));
-            while (lastSystem + 1 < count) {
-                int candidateBottom = systemBottom(lastSystem + 1, height, count, detected, useDetection);
-                if (candidateBottom - top > maxCropHeight) break;
-                lastSystem++;
-                bottom = candidateBottom;
+            int gapHeight = Math.max(4, Math.round(width * dp(7) / (float) scoreView.getWidth()));
+            int usedHeight = current.height();
+            SystemRef previousCursor = current, nextCursor = current;
+            boolean canLookBack = true, canLookForward = true;
+            while (true) {
+                boolean added = false;
+                if (canLookBack) {
+                    SystemRef candidate = adjacentSystem(previousCursor, -1, width);
+                    if (candidate == null) canLookBack = false;
+                    else if (usedHeight + gapHeight + candidate.height() <= maxCropHeight) {
+                        before.add(candidate); previousCursor = candidate;
+                        usedHeight += gapHeight + candidate.height(); added = true;
+                    } else canLookBack = false;
+                }
+                if (canLookForward) {
+                    SystemRef candidate = adjacentSystem(nextCursor, 1, width);
+                    if (candidate == null) canLookForward = false;
+                    else if (usedHeight + gapHeight + candidate.height() <= maxCropHeight) {
+                        after.add(candidate); nextCursor = candidate;
+                        usedHeight += gapHeight + candidate.height(); added = true;
+                    } else canLookForward = false;
+                }
+                if (!added) break;
             }
-            visibleSystemCount = lastSystem - systemIndex + 1;
+            ArrayList<SystemRef> visible = new ArrayList<>();
+            for (int i = before.size() - 1; i >= 0; i--) visible.add(before.get(i));
+            visible.add(current); visible.addAll(after);
+            visibleSystemCount = visible.size();
             refreshInfo();
-            Bitmap crop = Bitmap.createBitmap(whole, 0, top, width, Math.max(1, bottom - top));
-            drawSystemMarkers(crop, top, height, count, detected, useDetection, systemIndex, lastSystem);
-            scoreView.setImageBitmap(crop); whole.recycle();
+            Bitmap crop = composeSystems(visible, width, gapHeight);
+            scoreView.setImageBitmap(crop);
         } catch (Exception e) { Toast.makeText(this, "Seite konnte nicht dargestellt werden", Toast.LENGTH_SHORT).show(); }
-        finally { if (!pageClosed) page.close(); }
+    }
+
+    private int systemCount(int page, PageSystems detected) {
+        if (autoDetection) return detected.count() > 0 ? detected.count() : systemsPerPage;
+        return systemsPerPage;
+    }
+
+    private SystemRef systemRef(int page, int index, int width) {
+        PageSystems systems = getPageSystems(page, width);
+        boolean useDetection = autoDetection && systems.count() > 0;
+        int count = systemCount(page, systems);
+        if (index < 0 || index >= count) return null;
+        PdfRenderer.Page pdfPage = renderer.openPage(page);
+        int pageHeight;
+        try { pageHeight = Math.max(1, Math.round(width * pdfPage.getHeight() / (float) pdfPage.getWidth())); }
+        finally { pdfPage.close(); }
+        return new SystemRef(page, index,
+                systemTop(index, pageHeight, count, systems, useDetection),
+                systemBottom(index, pageHeight, count, systems, useDetection));
+    }
+
+    private SystemRef adjacentSystem(SystemRef source, int direction, int width) {
+        PageSystems systems = getPageSystems(source.page, width);
+        int count = systemCount(source.page, systems);
+        int targetIndex = source.index + direction;
+        if (targetIndex >= 0 && targetIndex < count) return systemRef(source.page, targetIndex, width);
+        int targetPage;
+        if (autoDetection) targetPage = findScorePage(source.page + direction, direction);
+        else targetPage = source.page + direction;
+        if (targetPage < 0 || targetPage >= renderer.getPageCount()) return null;
+        PageSystems targetSystems = getPageSystems(targetPage, width);
+        int targetCount = systemCount(targetPage, targetSystems);
+        if (autoDetection && targetSystems.count() == 0) return null;
+        return systemRef(targetPage, direction > 0 ? 0 : targetCount - 1, width);
+    }
+
+    private Bitmap composeSystems(List<SystemRef> systems, int width, int gapHeight) {
+        int totalHeight = 0;
+        for (SystemRef system : systems) totalHeight += system.height();
+        totalHeight += gapHeight * Math.max(0, systems.size() - 1);
+        Bitmap result = Bitmap.createBitmap(width, totalHeight, Bitmap.Config.ARGB_8888);
+        result.eraseColor(Color.WHITE);
+        Canvas canvas = new Canvas(result);
+        Paint imagePaint = new Paint(Paint.FILTER_BITMAP_FLAG | Paint.ANTI_ALIAS_FLAG);
+        float displayScale = Math.min(scoreView.getWidth() / (float) width, scoreView.getHeight() / (float) totalHeight);
+        Paint badgePaint = new Paint(Paint.ANTI_ALIAS_FLAG); badgePaint.setColor(Color.argb(205, 35, 43, 52));
+        Paint labelPaint = new Paint(Paint.ANTI_ALIAS_FLAG); labelPaint.setColor(Color.WHITE);
+        labelPaint.setTextAlign(Paint.Align.CENTER); labelPaint.setTextSize(dp(10) / displayScale);
+        labelPaint.setTypeface(android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL));
+        Paint dividerPaint = new Paint(Paint.ANTI_ALIAS_FLAG); dividerPaint.setColor(Color.argb(145, 75, 83, 91));
+        dividerPaint.setStrokeWidth(Math.max(1f, dp(1) / displayScale));
+        Bitmap pageBitmap = null; int renderedPage = -1, y = 0;
+        try {
+            for (int i = 0; i < systems.size(); i++) {
+                SystemRef system = systems.get(i);
+                if (renderedPage != system.page) {
+                    if (pageBitmap != null) pageBitmap.recycle();
+                    pageBitmap = renderPageBitmap(system.page, width); renderedPage = system.page;
+                }
+                int systemHeight = system.height();
+                Rect source = new Rect(0, system.top, width, system.bottom);
+                Rect destination = new Rect(0, y, width, y + systemHeight);
+                canvas.drawBitmap(pageBitmap, source, destination, imagePaint);
+                String label = (system.page + 1) + "·" + (system.index + 1);
+                float badgeHeight = dp(17) / displayScale;
+                float badgeWidth = Math.max(dp(27) / displayScale, labelPaint.measureText(label) + dp(8) / displayScale);
+                float badgeX = dp(5) / displayScale;
+                float badgeY = y + dp(3) / displayScale;
+                RectF badge = new RectF(badgeX, badgeY, badgeX + badgeWidth, badgeY + badgeHeight);
+                canvas.drawRoundRect(badge, badgeHeight / 2, badgeHeight / 2, badgePaint);
+                Paint.FontMetrics fm = labelPaint.getFontMetrics();
+                canvas.drawText(label, badge.centerX(), badge.centerY() - (fm.ascent + fm.descent) / 2, labelPaint);
+                y += systemHeight;
+                if (i + 1 < systems.size()) {
+                    canvas.drawLine(0, y + gapHeight / 2f, width, y + gapHeight / 2f, dividerPaint);
+                    y += gapHeight;
+                }
+            }
+        } finally { if (pageBitmap != null) pageBitmap.recycle(); }
+        return result;
     }
 
     private int systemTop(int index, int pageHeight, int count, PageSystems detected, boolean useDetection) {
@@ -391,36 +487,6 @@ public class MainActivity extends Activity {
         return useDetection ? detected.bottom[index] : Math.round(pageHeight * ((index + 1) / (float) count));
     }
 
-    private void drawSystemMarkers(Bitmap crop, int cropTop, int pageHeight, int count, PageSystems detected,
-                                   boolean useDetection, int firstSystem, int lastSystem) {
-        Canvas canvas = new Canvas(crop);
-        float displayScale = Math.min(scoreView.getWidth() / (float) crop.getWidth(), scoreView.getHeight() / (float) crop.getHeight());
-        if (displayScale <= 0) return;
-        Paint separator = new Paint(Paint.ANTI_ALIAS_FLAG);
-        separator.setColor(Color.argb(125, 70, 78, 86));
-        separator.setStrokeWidth(Math.max(1f, dp(1) / displayScale));
-        Paint badge = new Paint(Paint.ANTI_ALIAS_FLAG);
-        badge.setColor(Color.argb(220, 35, 43, 52));
-        Paint number = new Paint(Paint.ANTI_ALIAS_FLAG);
-        number.setColor(Color.WHITE); number.setTextAlign(Paint.Align.CENTER);
-        number.setTypeface(android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL));
-        number.setTextSize(dp(13) / displayScale);
-        float badgeWidth = dp(30) / displayScale, badgeHeight = dp(22) / displayScale;
-        float x = dp(8) / displayScale;
-        for (int system = firstSystem; system <= lastSystem; system++) {
-            int relativeTop = systemTop(system, pageHeight, count, detected, useDetection) - cropTop;
-            float y = relativeTop + dp(4) / displayScale;
-            RectF rect = new RectF(x, y, x + badgeWidth, y + badgeHeight);
-            canvas.drawRoundRect(rect, badgeHeight / 2, badgeHeight / 2, badge);
-            Paint.FontMetrics fm = number.getFontMetrics();
-            canvas.drawText(String.valueOf(system + 1), rect.centerX(), rect.centerY() - (fm.ascent + fm.descent) / 2, number);
-            if (system < lastSystem) {
-                int gapTop = systemBottom(system, pageHeight, count, detected, useDetection) - cropTop;
-                int gapBottom = systemTop(system + 1, pageHeight, count, detected, useDetection) - cropTop;
-                canvas.drawLine(0, (gapTop + gapBottom) / 2f, crop.getWidth(), (gapTop + gapBottom) / 2f, separator);
-            }
-        }
-    }
 
     private int currentSystemCount() {
         if (!autoDetection || pageIndex >= pageSystems.size()) return systemsPerPage;
@@ -513,13 +579,20 @@ public class MainActivity extends Activity {
         int count() { return top.length; }
     }
 
+    private static class SystemRef {
+        final int page, index, top, bottom;
+        SystemRef(int page, int index, int top, int bottom) {
+            this.page = page; this.index = index; this.top = top; this.bottom = bottom;
+        }
+        int height() { return bottom - top; }
+    }
+
     private void refreshInfo() {
         if (info == null) return;
         int count = currentSystemCount();
         boolean detected = autoDetection && pageIndex < pageSystems.size() && pageSystems.get(pageIndex) != null && pageSystems.get(pageIndex).count() > 0;
-        int lastVisible = Math.min(count, systemIndex + visibleSystemCount);
-        String systems = visibleSystemCount > 1 ? (systemIndex + 1) + "–" + lastVisible : String.valueOf(systemIndex + 1);
-        info.setText(displayName + (renderer == null ? "" : "\nSeite " + (pageIndex + 1) + "/" + renderer.getPageCount() + "   •   System " + systems + "/" + count + (autoDetection ? (detected ? " Auto" : " Fallback") : " Manuell")));
+        String visible = visibleSystemCount > 1 ? "   •   " + visibleSystemCount + " im Bild" : "";
+        info.setText(displayName + (renderer == null ? "" : "\nSeite " + (pageIndex + 1) + "/" + renderer.getPageCount() + "   •   System " + (systemIndex + 1) + "/" + count + visible + (autoDetection ? (detected ? " Auto" : " Fallback") : " Manuell")));
     }
 
     @Override public void onWindowFocusChanged(boolean hasFocus) { super.onWindowFocusChanged(hasFocus); if (hasFocus) immersive(); }
