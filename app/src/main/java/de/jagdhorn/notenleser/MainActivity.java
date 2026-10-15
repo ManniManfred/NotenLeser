@@ -457,6 +457,8 @@ public class MainActivity extends Activity {
                 float badgeX = dp(5) / displayScale;
                 float badgeY = y + dp(3) / displayScale;
                 RectF badge = new RectF(badgeX, badgeY, badgeX + badgeWidth, badgeY + badgeHeight);
+                boolean selected = system.page == pageIndex && system.index == systemIndex;
+                badgePaint.setColor(selected ? Color.argb(235, 20, 112, 196) : Color.argb(205, 35, 43, 52));
                 canvas.drawRoundRect(badge, badgeHeight / 2, badgeHeight / 2, badgePaint);
                 Paint.FontMetrics fm = labelPaint.getFontMetrics();
                 canvas.drawText(label, badge.centerX(), badge.centerY() - (fm.ascent + fm.descent) / 2, labelPaint);
