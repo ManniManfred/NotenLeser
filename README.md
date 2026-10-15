@@ -1,0 +1,18 @@
+# NotenLeser (Android)
+
+Native Android-App zum Lesen von PDF-Noten im Vollbild. Das PDF wird über den Android-Dateiauswahldialog geöffnet. Wähle dort den Nextcloud-Speicherort oder einen lokal synchronisierten Ordner. Android merkt sich die Dateiberechtigung, sodass die zuletzt geöffnete Datei beim nächsten Start wieder geladen werden kann.
+
+## Funktionen
+
+- PDF-Seiten werden mit Androids PDF-Renderer dargestellt.
+- Vollbild ohne Systemleisten; Display bleibt während des Lesens an.
+- Tippen auf „PDF öffnen“, um eine Notendatei auszuwählen.
+- Wischen nach links/rechts oder die Tasten „Weiter“/„Zurück“ wechseln das System. Am Seitenende springt die App auf die nächste PDF-Seite.
+- Die App sucht automatisch nach fünf langen, waagerechten Notenlinien und navigiert zwischen erkannten Systemen.
+- Über „Auto“ kann auf manuelle Seiteneinteilung umgeschaltet werden. Dann lässt sich die Zahl der Abschnitte mit −/+ einstellen (1 bis 12; Standard 4).
+
+Die automatische Erkennung sucht einzelne Notenzeilen und fasst benachbarte Zeilen anhand ihrer Abstände zu einem gemeinsamen System zusammen. So bleiben mehrere Stimmen beziehungsweise Staves eines Systems gemeinsam im Ausschnitt. Sie ist auf klar gedruckte Noten mit langen, horizontalen Notenlinien ausgelegt. Bei ungewöhnlichem Layout oder sehr blassen Linien kann sie danebenliegen; dann auf „Auto aus“ umschalten und die manuelle Einteilung verwenden. Die Kameragestenerkennung ist als nächster Ausbauschritt vorgesehen und noch nicht implementiert.
+
+## In Android Studio öffnen
+
+Öffne diesen Ordner in Android Studio und lasse Gradle synchronisieren (Android Gradle Plugin 8.7.3, compile SDK 35, Mindestversion Android 6.0). Starte die App anschließend auf einem Gerät oder Emulator. Ein Android SDK ist für den Build erforderlich.
