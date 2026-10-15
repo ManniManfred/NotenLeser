@@ -128,15 +128,12 @@ public class MainActivity extends Activity {
         topOverlay.addView(info, new LinearLayout.LayoutParams(-2, -2));
         LinearLayout tools = new LinearLayout(this); tools.setGravity(Gravity.CENTER_VERTICAL);
         TextView open = button("Öffnen", this::chooseSource);
-        TextView minus = button("−", () -> changeSystemCount(-1));
         detectionButton = button("Auto an", this::toggleDetection);
-        TextView plus = button("+", () -> changeSystemCount(1));
         TextView previous = button("‹", this::previous); previous.setContentDescription("Vorheriges System");
         TextView next = button("›", this::next); next.setContentDescription("Nächstes System");
         previous.setTextSize(22); next.setTextSize(22);
         previous.setPadding(dp(4), dp(10), dp(4), dp(10)); next.setPadding(dp(4), dp(10), dp(4), dp(10));
-        addTool(tools, open); addTool(tools, previous); addTool(tools, minus);
-        addTool(tools, detectionButton); addTool(tools, plus); addTool(tools, next);
+        addTool(tools, open); addTool(tools, previous); addTool(tools, detectionButton); addTool(tools, next);
         topOverlay.addView(tools, new LinearLayout.LayoutParams(-2, -2));
         FrameLayout.LayoutParams topParams = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.LEFT);
         topParams.setMargins(dp(10), dp(12), 0, 0);
@@ -269,6 +266,10 @@ public class MainActivity extends Activity {
     }
 
     private void openPdf(Uri uri) {
+        openPdf(uri, false);
+    }
+
+    private void openPdf(Uri uri, boolean startAtLastPage) {
         if (uri == null) {
             Toast.makeText(this, "Die Dateiauswahl hat keinen Datei-URI zurückgegeben", Toast.LENGTH_LONG).show();
             return;
@@ -276,10 +277,10 @@ public class MainActivity extends Activity {
         final int requestId = ++openRequestId;
         closePdf();
         Toast.makeText(this, "PDF wird geladen …", Toast.LENGTH_SHORT).show();
-        new Thread(() -> loadPdf(uri, requestId), "notenleser-pdf-loader").start();
+        new Thread(() -> loadPdf(uri, requestId, startAtLastPage), "notenleser-pdf-loader").start();
     }
 
-    private void loadPdf(Uri uri, int requestId) {
+    private void loadPdf(Uri uri, int requestId, boolean startAtLastPage) {
         File localCopy = null;
         ParcelFileDescriptor localDescriptor = null;
         PdfRenderer localRenderer = null;
@@ -309,9 +310,13 @@ public class MainActivity extends Activity {
                 descriptor = loadedDescriptor;
                 renderer = loadedRenderer;
                 displayName = loadedName;
-                pdfUri = uri; pageIndex = 0; systemIndex = 0;
+                pdfUri = uri; pageIndex = startAtLastPage ? loadedRenderer.getPageCount() - 1 : 0; systemIndex = 0;
                 pageSystems.clear();
                 for (int i = 0; i < renderer.getPageCount(); i++) pageSystems.add(null);
+                if (startAtLastPage && autoDetection) {
+                    int lastScorePage = findScorePage(pageIndex, -1);
+                    if (lastScorePage >= 0) pageIndex = lastScorePage;
+                }
                 getPreferences(MODE_PRIVATE).edit().putString("pdf", uri.toString()).apply();
                 renderSystem();
             });
@@ -346,52 +351,46 @@ public class MainActivity extends Activity {
         if (cachedPdf != null) { cachedPdf.delete(); cachedPdf = null; }
     }
 
-    private void changeSystemCount(int delta) {
-        if (autoDetection) {
-            Toast.makeText(this, "Für manuelle Einteilung zuerst Auto antippen", Toast.LENGTH_SHORT).show();
-            return;
-        }
-        systemsPerPage = Math.max(1, Math.min(12, systemsPerPage + delta));
-        systemIndex = Math.min(systemIndex, systemsPerPage - 1); renderSystem();
-    }
-
     private void toggleDetection() {
         autoDetection = !autoDetection;
         detectionButton.setText(autoDetection ? "Auto an" : "Auto aus");
         systemIndex = 0;
-        Toast.makeText(this, autoDetection ? "Automatische Notensystem-Erkennung" : "Manuelle Seiteneinteilung", Toast.LENGTH_SHORT).show();
+        Toast.makeText(this, autoDetection ? "Automatische Notensystem-Erkennung" : "Seitenweise Ansicht", Toast.LENGTH_SHORT).show();
         renderSystem();
     }
 
     private void next() {
         if (renderer == null) { pickPdf(); return; }
-        int count = currentSystemCount();
-        if (systemIndex + 1 < count) systemIndex++;
-        else {
-            int nextPage = autoDetection ? findScorePage(pageIndex + 1, 1) :
-                    (pageIndex + 1 < renderer.getPageCount() ? pageIndex + 1 : -1);
-            if (nextPage >= 0) { pageIndex = nextPage; systemIndex = 0; }
-            else if (folderPdfIndex >= 0 && folderPdfIndex + 1 < folderPdfs.size()) {
-                folderPdfIndex++;
-                openPdf(folderPdfs.get(folderPdfIndex));
-                return;
-            } else Toast.makeText(this, "Ende der Noten", Toast.LENGTH_SHORT).show();
+        if (autoDetection && systemIndex + 1 < currentSystemCount()) {
+            systemIndex++;
+            renderSystem();
+            return;
         }
+        int nextPage = autoDetection ? findScorePage(pageIndex + 1, 1) :
+                (pageIndex + 1 < renderer.getPageCount() ? pageIndex + 1 : -1);
+        if (nextPage >= 0) { pageIndex = nextPage; systemIndex = 0; }
+        else if (folderPdfIndex >= 0 && folderPdfIndex + 1 < folderPdfs.size()) {
+            folderPdfIndex++;
+            openPdf(folderPdfs.get(folderPdfIndex));
+            return;
+        } else Toast.makeText(this, "Ende der Noten", Toast.LENGTH_SHORT).show();
         renderSystem();
     }
 
     private void previous() {
         if (renderer == null) { pickPdf(); return; }
-        if (systemIndex > 0) systemIndex--;
-        else {
-            int previousPage = autoDetection ? findScorePage(pageIndex - 1, -1) : pageIndex - 1;
-            if (previousPage >= 0) { pageIndex = previousPage; systemIndex = Math.max(0, currentSystemCount() - 1); }
-            else if (folderPdfIndex > 0) {
-                folderPdfIndex--;
-                openPdf(folderPdfs.get(folderPdfIndex));
-                return;
-            } else Toast.makeText(this, "Anfang der Noten", Toast.LENGTH_SHORT).show();
+        if (autoDetection && systemIndex > 0) {
+            systemIndex--;
+            renderSystem();
+            return;
         }
+        int previousPage = autoDetection ? findScorePage(pageIndex - 1, -1) : pageIndex - 1;
+        if (previousPage >= 0) { pageIndex = previousPage; systemIndex = autoDetection ? Math.max(0, currentSystemCount() - 1) : 0; }
+        else if (folderPdfIndex > 0) {
+            folderPdfIndex--;
+            openPdf(folderPdfs.get(folderPdfIndex), true);
+            return;
+        } else Toast.makeText(this, "Anfang der Noten", Toast.LENGTH_SHORT).show();
         renderSystem();
     }
 
@@ -432,6 +431,12 @@ public class MainActivity extends Activity {
         if (scoreView.getWidth() < 1 || scoreView.getHeight() < 1) { scoreView.post(this::renderSystem); return; }
         try {
             int width = Math.max(scoreView.getWidth(), 1200);
+            if (!autoDetection) {
+                visibleSystemCount = 1;
+                refreshInfo();
+                scoreView.setImageBitmap(renderPageBitmap(pageIndex, width));
+                return;
+            }
             PageSystems detected = getPageSystems(pageIndex, width);
             if (autoDetection && detected.count() == 0 && pageIndex + 1 < renderer.getPageCount()) {
                 int nextScorePage = findScorePage(pageIndex + 1, 1);
@@ -706,6 +711,11 @@ public class MainActivity extends Activity {
 
     private void refreshInfo() {
         if (info == null) return;
+        if (!autoDetection) {
+            String filePosition = folderPdfIndex >= 0 ? "   •   PDF " + (folderPdfIndex + 1) + "/" + folderPdfs.size() : "";
+            info.setText(displayName + (renderer == null ? "" : "\nSeite " + (pageIndex + 1) + "/" + renderer.getPageCount() + filePosition + "   •   Seitenmodus"));
+            return;
+        }
         int count = currentSystemCount();
         boolean detected = autoDetection && pageIndex < pageSystems.size() && pageSystems.get(pageIndex) != null && pageSystems.get(pageIndex).count() > 0;
         String visible = visibleSystemCount > 1 ? "   •   " + visibleSystemCount + " im Bild" : "";
