@@ -8,6 +8,7 @@ import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
+import android.graphics.Matrix;
 import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.drawable.GradientDrawable;
@@ -20,6 +21,7 @@ import android.provider.OpenableColumns;
 import android.provider.DocumentsContract;
 import android.view.Gravity;
 import android.view.MotionEvent;
+import android.view.ScaleGestureDetector;
 import android.view.View;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
@@ -27,16 +29,27 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
 
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.ByteArrayOutputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class MainActivity extends Activity {
     private static final int PICK_PDF = 41;
@@ -51,18 +64,34 @@ public class MainActivity extends Activity {
     private int openRequestId = 0;
     private int systemsPerPage = 4;
     private boolean autoDetection = true;
+    private boolean editMode;
     private final List<PageSystems> pageSystems = new ArrayList<>();
     private final List<Uri> folderPdfs = new ArrayList<>();
+    private final Map<Integer, float[]> manualPageRatios = new HashMap<>();
+    private final Set<Integer> manualPages = new HashSet<>();
+    private final ExecutorService sidecarExecutor = Executors.newSingleThreadExecutor();
     private int folderPdfIndex = -1;
+    private Uri folderTreeUri;
     private final Handler uiHandler = new Handler();
     private final Runnable hideControlsTask = this::hideControls;
     private ImageView scoreView;
     private TextView info;
     private TextView detectionButton;
+    private TextView editButton;
+    private TextView undoButton;
+    private TextView clearButton;
     private LinearLayout topOverlay;
     private String displayName = "Keine Noten geöffnet";
     private float touchY;
     private float touchX;
+    private float lastTouchX;
+    private float lastTouchY;
+    private float zoom = 1f;
+    private float panX;
+    private float panY;
+    private boolean multiTouchGesture;
+    private final Matrix imageMatrix = new Matrix();
+    private ScaleGestureDetector scaleGestureDetector;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -72,6 +101,7 @@ public class MainActivity extends Activity {
         String savedFolder = getPreferences(MODE_PRIVATE).getString("folder_tree", null);
         if (savedFolder != null) {
             Uri tree = Uri.parse(savedFolder);
+            folderTreeUri = tree;
             new Thread(() -> loadFolderPdfs(tree), "notenleser-folder-loader").start();
         } else {
             String saved = getPreferences(MODE_PRIVATE).getString("pdf", null);
@@ -101,16 +131,64 @@ public class MainActivity extends Activity {
 
     private void buildUi() {
         FrameLayout root = new FrameLayout(this); root.setBackgroundColor(Color.BLACK);
-        scoreView = new ImageView(this); scoreView.setBackgroundColor(Color.BLACK); scoreView.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        scoreView = new ImageView(this); scoreView.setBackgroundColor(Color.BLACK); scoreView.setScaleType(ImageView.ScaleType.MATRIX);
+        scaleGestureDetector = new ScaleGestureDetector(this, new ScaleGestureDetector.SimpleOnScaleGestureListener() {
+            @Override public boolean onScale(ScaleGestureDetector detector) {
+                if (scoreView.getDrawable() == null) return false;
+                float oldZoom = zoom;
+                float newZoom = Math.max(1f, Math.min(5f, oldZoom * detector.getScaleFactor()));
+                if (Math.abs(newZoom - oldZoom) < .001f) return true;
+                float focusX = detector.getFocusX(), focusY = detector.getFocusY();
+                float baseScale = baseImageScale();
+                float offsetX = (scoreView.getWidth() - scoreView.getDrawable().getIntrinsicWidth() * baseScale) / 2f;
+                float offsetY = (scoreView.getHeight() - scoreView.getDrawable().getIntrinsicHeight() * baseScale) / 2f;
+                float imageX = (focusX - offsetX - panX) / (baseScale * oldZoom);
+                float imageY = (focusY - offsetY - panY) / (baseScale * oldZoom);
+                zoom = newZoom;
+                panX = focusX - offsetX - imageX * baseScale * zoom;
+                panY = focusY - offsetY - imageY * baseScale * zoom;
+                if (zoom == 1f) { panX = 0f; panY = 0f; }
+                clampImagePan();
+                applyImageTransform();
+                return true;
+            }
+        });
         scoreView.setOnTouchListener((v, e) -> {
-            if (e.getAction() == MotionEvent.ACTION_DOWN) { touchX = e.getX(); touchY = e.getY(); return true; }
-            if (e.getAction() == MotionEvent.ACTION_UP) {
+            scaleGestureDetector.onTouchEvent(e);
+            if (e.getActionMasked() == MotionEvent.ACTION_DOWN) {
+                touchX = lastTouchX = e.getX(); touchY = lastTouchY = e.getY();
+                multiTouchGesture = false;
+                return true;
+            }
+            if (e.getActionMasked() == MotionEvent.ACTION_POINTER_DOWN) {
+                multiTouchGesture = true;
+                return true;
+            }
+            if (e.getActionMasked() == MotionEvent.ACTION_MOVE) {
+                if (e.getPointerCount() > 1) { multiTouchGesture = true; return true; }
+                if (editMode && zoom > 1.01f && !scaleGestureDetector.isInProgress()) {
+                    panX += e.getX() - lastTouchX;
+                    panY += e.getY() - lastTouchY;
+                    clampImagePan();
+                    applyImageTransform();
+                }
+                lastTouchX = e.getX(); lastTouchY = e.getY();
+                return true;
+            }
+            if (e.getActionMasked() == MotionEvent.ACTION_UP) {
                 float dx = e.getX() - touchX, dy = e.getY() - touchY;
+                if (editMode) {
+                    if (multiTouchGesture || (zoom > 1.01f && Math.hypot(dx, dy) > dp(8))) return true;
+                    if (Math.abs(dx) < dp(16) && Math.abs(dy) < dp(16)) toggleControls();
+                    else addManualSystemFromDrag(touchY, e.getY());
+                    return true;
+                }
                 if (Math.abs(dx) > Math.max(dp(48), v.getWidth() * .12f) && Math.abs(dx) > Math.abs(dy)) {
                     showControls(); if (dx < 0) next(); else previous();
                 } else if (Math.abs(dx) < dp(16) && Math.abs(dy) < dp(16)) toggleControls();
                 return true;
             }
+            if (e.getActionMasked() == MotionEvent.ACTION_CANCEL) { multiTouchGesture = false; return true; }
             return true;
         });
         scoreView.addOnLayoutChangeListener((v, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> {
@@ -129,11 +207,16 @@ public class MainActivity extends Activity {
         LinearLayout tools = new LinearLayout(this); tools.setGravity(Gravity.CENTER_VERTICAL);
         TextView open = button("Öffnen", this::chooseSource);
         detectionButton = button("Auto an", this::toggleDetection);
-        TextView previous = button("‹", this::previous); previous.setContentDescription("Vorheriges System");
-        TextView next = button("›", this::next); next.setContentDescription("Nächstes System");
+        TextView previous = button("‹", this::previous); previous.setContentDescription("Zurück");
+        TextView next = button("›", this::next); next.setContentDescription("Weiter");
+        editButton = button("Bearb.", this::toggleEditMode);
+        undoButton = button("↶", this::undoManualSystem); undoButton.setContentDescription("Letztes System entfernen");
+        clearButton = button("×", this::clearManualSystems); clearButton.setContentDescription("Systeme dieser Seite löschen");
+        undoButton.setVisibility(View.GONE); clearButton.setVisibility(View.GONE);
         previous.setTextSize(22); next.setTextSize(22);
         previous.setPadding(dp(4), dp(10), dp(4), dp(10)); next.setPadding(dp(4), dp(10), dp(4), dp(10));
         addTool(tools, open); addTool(tools, previous); addTool(tools, detectionButton); addTool(tools, next);
+        addTool(tools, editButton); addTool(tools, undoButton); addTool(tools, clearButton);
         topOverlay.addView(tools, new LinearLayout.LayoutParams(-2, -2));
         FrameLayout.LayoutParams topParams = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.LEFT);
         topParams.setMargins(dp(10), dp(12), 0, 0);
@@ -189,7 +272,7 @@ public class MainActivity extends Activity {
 
     private void pickFolder() {
         Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
-        i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+        i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
         startActivityForResult(i, PICK_FOLDER);
     }
 
@@ -197,7 +280,9 @@ public class MainActivity extends Activity {
         super.onActivityResult(request, result, data);
         if (request == PICK_FOLDER && result == RESULT_OK && data != null && data.getData() != null) {
             Uri tree = data.getData();
-            try { getContentResolver().takePersistableUriPermission(tree, Intent.FLAG_GRANT_READ_URI_PERMISSION); } catch (Exception ignored) { }
+            folderTreeUri = tree;
+            int granted = data.getFlags() & (Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+            try { getContentResolver().takePersistableUriPermission(tree, granted); } catch (Exception ignored) { }
             getPreferences(MODE_PRIVATE).edit().putString("folder_tree", tree.toString()).remove("pdf").apply();
             folderPdfs.clear(); folderPdfIndex = -1;
             new Thread(() -> loadFolderPdfs(tree), "notenleser-folder-loader").start();
@@ -205,6 +290,10 @@ public class MainActivity extends Activity {
         }
         if (request == PICK_PDF && result == RESULT_OK && data != null) {
             Uri u = data.getData();
+            folderTreeUri = null;
+            editMode = false; autoDetection = true;
+            detectionButton.setText("Auto an"); editButton.setText("Bearb.");
+            undoButton.setVisibility(View.GONE); clearButton.setVisibility(View.GONE);
             try { getContentResolver().takePersistableUriPermission(u, Intent.FLAG_GRANT_READ_URI_PERMISSION); } catch (Exception ignored) { }
             folderPdfs.clear(); folderPdfIndex = -1;
             getPreferences(MODE_PRIVATE).edit().remove("folder_tree").apply();
@@ -258,6 +347,73 @@ public class MainActivity extends Activity {
         }
     }
 
+    private Uri findSidecar(Uri tree, String sidecarName) {
+        if (tree == null) return null;
+        try {
+            Uri children = DocumentsContract.buildChildDocumentsUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree));
+            try (Cursor cursor = getContentResolver().query(children,
+                    new String[]{DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME},
+                    null, null, null)) {
+                if (cursor != null) {
+                    int idColumn = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DOCUMENT_ID);
+                    int nameColumn = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME);
+                    while (cursor.moveToNext()) {
+                        if (idColumn >= 0 && nameColumn >= 0 && sidecarName.equals(cursor.getString(nameColumn)))
+                            return DocumentsContract.buildDocumentUriUsingTree(tree, cursor.getString(idColumn));
+                    }
+                }
+            }
+        } catch (Exception ignored) { }
+        return null;
+    }
+
+    private Uri sidecarFolderUri(Uri tree) {
+        return DocumentsContract.buildDocumentUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree));
+    }
+
+    private String sidecarName(Uri pdf) {
+        String name = queryDisplayName(pdf);
+        int extension = name.lastIndexOf('.');
+        if (extension > 0) name = name.substring(0, extension);
+        return name + ".systems.json";
+    }
+
+    private Map<Integer, float[]> readSystemSidecar(Uri tree, Uri pdf) {
+        Map<Integer, float[]> result = new HashMap<>();
+        if (tree == null || pdf == null) return result;
+        Uri sidecar = findSidecar(tree, sidecarName(pdf));
+        if (sidecar == null) return result;
+        try (InputStream input = getContentResolver().openInputStream(sidecar)) {
+            if (input == null) return result;
+            ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+            byte[] buffer = new byte[4096];
+            int read;
+            while ((read = input.read(buffer)) != -1) bytes.write(buffer, 0, read);
+            JSONObject root = new JSONObject(new String(bytes.toByteArray(), StandardCharsets.UTF_8));
+            JSONObject pages = root.optJSONObject("pages");
+            if (pages == null) return result;
+            java.util.Iterator<String> keys = pages.keys();
+            while (keys.hasNext()) {
+                String key = keys.next();
+                int page;
+                try { page = Integer.parseInt(key); } catch (NumberFormatException ignored) { continue; }
+                JSONArray systems = pages.optJSONArray(key);
+                if (page < 0 || systems == null) continue;
+                float[] ratios = new float[systems.length() * 2];
+                int valid = 0;
+                for (int i = 0; i < systems.length(); i++) {
+                    JSONArray bounds = systems.optJSONArray(i);
+                    if (bounds == null || bounds.length() < 2) continue;
+                    float top = (float) bounds.optDouble(0, -1), bottom = (float) bounds.optDouble(1, -1);
+                    if (top < 0 || bottom > 1 || bottom - top < .005f) continue;
+                    ratios[valid * 2] = top; ratios[valid * 2 + 1] = bottom; valid++;
+                }
+                if (valid > 0 || systems.length() == 0) result.put(page, java.util.Arrays.copyOf(ratios, valid * 2));
+            }
+        } catch (Exception ignored) { }
+        return result;
+    }
+
     private String describeCause(Throwable error) {
         Throwable cause = error;
         while (cause.getCause() != null && cause.getCause() != cause) cause = cause.getCause();
@@ -275,12 +431,13 @@ public class MainActivity extends Activity {
             return;
         }
         final int requestId = ++openRequestId;
+        final Uri sidecarTree = folderTreeUri;
         closePdf();
         Toast.makeText(this, "PDF wird geladen …", Toast.LENGTH_SHORT).show();
-        new Thread(() -> loadPdf(uri, requestId, startAtLastPage), "notenleser-pdf-loader").start();
+        new Thread(() -> loadPdf(uri, requestId, startAtLastPage, sidecarTree), "notenleser-pdf-loader").start();
     }
 
-    private void loadPdf(Uri uri, int requestId, boolean startAtLastPage) {
+    private void loadPdf(Uri uri, int requestId, boolean startAtLastPage, Uri sidecarTree) {
         File localCopy = null;
         ParcelFileDescriptor localDescriptor = null;
         PdfRenderer localRenderer = null;
@@ -295,6 +452,7 @@ public class MainActivity extends Activity {
             }
             localDescriptor = ParcelFileDescriptor.open(localCopy, ParcelFileDescriptor.MODE_READ_ONLY);
             localRenderer = new PdfRenderer(localDescriptor);
+            final Map<Integer, float[]> loadedSidecar = readSystemSidecar(sidecarTree, uri);
             final String loadedName = queryDisplayName(uri);
             final File loadedFile = localCopy;
             final ParcelFileDescriptor loadedDescriptor = localDescriptor;
@@ -313,6 +471,8 @@ public class MainActivity extends Activity {
                 pdfUri = uri; pageIndex = startAtLastPage ? loadedRenderer.getPageCount() - 1 : 0; systemIndex = 0;
                 pageSystems.clear();
                 for (int i = 0; i < renderer.getPageCount(); i++) pageSystems.add(null);
+                manualPageRatios.clear(); manualPageRatios.putAll(loadedSidecar);
+                manualPages.clear(); manualPages.addAll(loadedSidecar.keySet());
                 if (startAtLastPage && autoDetection) {
                     int lastScorePage = findScorePage(pageIndex, -1);
                     if (lastScorePage >= 0) pageIndex = lastScorePage;
@@ -352,11 +512,160 @@ public class MainActivity extends Activity {
     }
 
     private void toggleDetection() {
+        if (editMode) {
+            Toast.makeText(this, "Zum Beenden erst Bearb. antippen", Toast.LENGTH_SHORT).show();
+            return;
+        }
         autoDetection = !autoDetection;
         detectionButton.setText(autoDetection ? "Auto an" : "Auto aus");
         systemIndex = 0;
         Toast.makeText(this, autoDetection ? "Automatische Notensystem-Erkennung" : "Seitenweise Ansicht", Toast.LENGTH_SHORT).show();
         renderSystem();
+    }
+
+    private void toggleEditMode() {
+        if (renderer == null) {
+            Toast.makeText(this, "Bitte zuerst eine PDF öffnen", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (!editMode && (folderTreeUri == null || !hasFolderWritePermission())) {
+            Toast.makeText(this, "Zum Bearbeiten den PDF-Ordner mit Schreibzugriff auswählen", Toast.LENGTH_LONG).show();
+            return;
+        }
+        editMode = !editMode;
+        autoDetection = !editMode;
+        zoom = 1f; panX = 0f; panY = 0f;
+        detectionButton.setText(autoDetection ? "Auto an" : "Auto aus");
+        editButton.setText(editMode ? "Fertig" : "Bearb.");
+        undoButton.setVisibility(editMode ? View.VISIBLE : View.GONE);
+        clearButton.setVisibility(editMode ? View.VISIBLE : View.GONE);
+        systemIndex = 0;
+        if (editMode) {
+            ensureManualPage(pageIndex, Math.max(scoreView.getWidth(), 1200));
+            Toast.makeText(this, "Ziehe über jedes Notensystem, um es zu markieren", Toast.LENGTH_LONG).show();
+        }
+        renderSystem();
+    }
+
+    private boolean hasFolderWritePermission() {
+        if (folderTreeUri == null) return false;
+        for (android.content.UriPermission permission : getContentResolver().getPersistedUriPermissions()) {
+            if (folderTreeUri.equals(permission.getUri()) && permission.isWritePermission()) return true;
+        }
+        return false;
+    }
+
+    private void ensureManualPage(int page, int width) {
+        if (page < 0 || page >= pageSystems.size() || manualPages.contains(page)) return;
+        manualPages.add(page);
+        manualPageRatios.put(page, new float[0]);
+        pageSystems.set(page, new PageSystems(new int[0], new int[0]));
+    }
+
+    private void addManualSystemFromDrag(float startY, float endY) {
+        int width = Math.max(scoreView.getWidth(), 1200);
+        int pageHeight = pageBitmapHeight(pageIndex, width);
+        float scale = baseImageScale() * zoom;
+        float imageTop = (scoreView.getHeight() - pageHeight * baseImageScale() * zoom) / 2f + panY;
+        int top = Math.max(0, Math.min(pageHeight, Math.round((Math.min(startY, endY) - imageTop) / scale)));
+        int bottom = Math.max(0, Math.min(pageHeight, Math.round((Math.max(startY, endY) - imageTop) / scale)));
+        if (bottom - top < Math.max(dp(18) / scale, pageHeight * .01f)) {
+            Toast.makeText(this, "System durch Ziehen von oben nach unten markieren", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        ensureManualPage(pageIndex, width);
+        ArrayList<float[]> ranges = manualRanges(pageIndex);
+        ranges.add(new float[]{top / (float) pageHeight, bottom / (float) pageHeight});
+        ranges.sort(Comparator.comparingDouble(range -> range[0]));
+        setManualRanges(pageIndex, ranges, width);
+        saveManualSidecarAsync();
+        renderSystem();
+    }
+
+    private ArrayList<float[]> manualRanges(int page) {
+        ArrayList<float[]> ranges = new ArrayList<>();
+        float[] stored = manualPageRatios.get(page);
+        if (stored != null) for (int i = 0; i + 1 < stored.length; i += 2)
+            ranges.add(new float[]{stored[i], stored[i + 1]});
+        return ranges;
+    }
+
+    private void setManualRanges(int page, List<float[]> ranges, int width) {
+        float[] ratios = new float[ranges.size() * 2];
+        for (int i = 0; i < ranges.size(); i++) {
+            ratios[i * 2] = ranges.get(i)[0]; ratios[i * 2 + 1] = ranges.get(i)[1];
+        }
+        manualPages.add(page);
+        manualPageRatios.put(page, ratios);
+        pageSystems.set(page, pageSystemsFromRatios(page, width, ratios));
+    }
+
+    private PageSystems pageSystemsFromRatios(int page, int width, float[] ratios) {
+        int pageHeight = pageBitmapHeight(page, width);
+        int count = ratios.length / 2;
+        int[] top = new int[count], bottom = new int[count];
+        for (int i = 0; i < count; i++) {
+            top[i] = Math.max(0, Math.min(pageHeight - 1, Math.round(ratios[i * 2] * pageHeight)));
+            bottom[i] = Math.max(top[i] + 1, Math.min(pageHeight, Math.round(ratios[i * 2 + 1] * pageHeight)));
+        }
+        return new PageSystems(top, bottom);
+    }
+
+    private void undoManualSystem() {
+        ArrayList<float[]> ranges = manualRanges(pageIndex);
+        if (ranges.isEmpty()) return;
+        ranges.remove(ranges.size() - 1);
+        setManualRanges(pageIndex, ranges, Math.max(scoreView.getWidth(), 1200));
+        saveManualSidecarAsync();
+        renderSystem();
+    }
+
+    private void clearManualSystems() {
+        ensureManualPage(pageIndex, Math.max(scoreView.getWidth(), 1200));
+        setManualRanges(pageIndex, new ArrayList<>(), Math.max(scoreView.getWidth(), 1200));
+        saveManualSidecarAsync();
+        renderSystem();
+    }
+
+    private void saveManualSidecarAsync() {
+        if (folderTreeUri == null || pdfUri == null) return;
+        final Uri tree = folderTreeUri;
+        final String name = sidecarName(pdfUri);
+        final String jsonText;
+        try {
+            JSONObject root = new JSONObject(); root.put("version", 1); root.put("pdf", queryDisplayName(pdfUri));
+            JSONObject pages = new JSONObject();
+            ArrayList<Integer> indices = new ArrayList<>(manualPages); Collections.sort(indices);
+            for (int page : indices) {
+                JSONArray systems = new JSONArray();
+                float[] ratios = manualPageRatios.get(page);
+                if (ratios != null) for (int i = 0; i + 1 < ratios.length; i += 2) {
+                    JSONArray bounds = new JSONArray(); bounds.put(ratios[i]); bounds.put(ratios[i + 1]); systems.put(bounds);
+                }
+                pages.put(String.valueOf(page), systems);
+            }
+            root.put("pages", pages);
+            jsonText = root.toString(2);
+        } catch (JSONException e) {
+            Toast.makeText(this, "JSON konnte nicht erstellt werden", Toast.LENGTH_LONG).show();
+            return;
+        }
+        sidecarExecutor.execute(() -> {
+            try {
+                Uri document = findSidecar(tree, name);
+                if (document == null) document = DocumentsContract.createDocument(
+                        getContentResolver(), sidecarFolderUri(tree), "application/json", name);
+                if (document == null) throw new IOException("Der Nextcloud-Ordner kann keine JSON-Datei anlegen");
+                try (OutputStream output = getContentResolver().openOutputStream(document, "wt")) {
+                    if (output == null) throw new IOException("Die JSON-Datei kann nicht geschrieben werden");
+                    output.write(jsonText.getBytes(StandardCharsets.UTF_8));
+                }
+                runOnUiThread(() -> Toast.makeText(this, "Systeme in " + name + " gespeichert", Toast.LENGTH_SHORT).show());
+            } catch (Exception e) {
+                String details = describeCause(e);
+                runOnUiThread(() -> Toast.makeText(this, "JSON-Speichern fehlgeschlagen: " + details, Toast.LENGTH_LONG).show());
+            }
+        });
     }
 
     private void next() {
@@ -405,6 +714,12 @@ public class MainActivity extends Activity {
     }
 
     private PageSystems getPageSystems(int pageIndex, int width) {
+        if (manualPages.contains(pageIndex)) {
+            float[] ratios = manualPageRatios.get(pageIndex);
+            PageSystems manual = pageSystemsFromRatios(pageIndex, width, ratios == null ? new float[0] : ratios);
+            pageSystems.set(pageIndex, manual);
+            return manual;
+        }
         PageSystems systems = pageSystems.get(pageIndex);
         if (systems != null) return systems;
         Bitmap bitmap = renderPageBitmap(pageIndex, width);
@@ -412,6 +727,35 @@ public class MainActivity extends Activity {
         bitmap.recycle();
         pageSystems.set(pageIndex, systems);
         return systems;
+    }
+
+    private int pageBitmapHeight(int pageIndex, int width) {
+        PdfRenderer.Page page = renderer.openPage(pageIndex);
+        try { return Math.max(1, Math.round(width * page.getHeight() / (float) page.getWidth())); }
+        finally { page.close(); }
+    }
+
+    private void drawManualOverlay(Bitmap bitmap, int page) {
+        float[] ratios = manualPageRatios.get(page);
+        if (ratios == null || ratios.length == 0) return;
+        Canvas canvas = new Canvas(bitmap);
+        Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG); fill.setColor(Color.argb(58, 20, 112, 196));
+        Paint edge = new Paint(Paint.ANTI_ALIAS_FLAG); edge.setColor(Color.argb(220, 20, 112, 196));
+        edge.setStrokeWidth(Math.max(2f, bitmap.getWidth() / 600f)); edge.setStyle(Paint.Style.STROKE);
+        Paint text = new Paint(Paint.ANTI_ALIAS_FLAG); text.setColor(Color.WHITE);
+        text.setTextSize(Math.max(16f, bitmap.getWidth() / 45f));
+        text.setTypeface(android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL));
+        Paint badge = new Paint(Paint.ANTI_ALIAS_FLAG); badge.setColor(Color.argb(210, 20, 112, 196));
+        for (int i = 0; i + 1 < ratios.length; i += 2) {
+            float top = ratios[i] * bitmap.getHeight(), bottom = ratios[i + 1] * bitmap.getHeight();
+            RectF area = new RectF(0, top, bitmap.getWidth(), bottom);
+            canvas.drawRect(area, fill); canvas.drawRect(area, edge);
+            float baseline = Math.min(bitmap.getHeight() - 4, top + Math.max(22f, bitmap.getWidth() / 35f));
+            float badgeWidth = Math.max(bitmap.getWidth() / 30f, text.measureText("System " + (i / 2 + 1)) + 20f);
+            RectF label = new RectF(8, top + 5, 8 + badgeWidth, baseline + 6);
+            canvas.drawRoundRect(label, 8, 8, badge);
+            canvas.drawText("System " + (i / 2 + 1), 16, baseline, text);
+        }
     }
 
     private Bitmap renderPageBitmap(int pageIndex, int width) {
@@ -425,6 +769,41 @@ public class MainActivity extends Activity {
         } finally { page.close(); }
     }
 
+    private float baseImageScale() {
+        if (scoreView == null || scoreView.getDrawable() == null) return 1f;
+        int imageWidth = scoreView.getDrawable().getIntrinsicWidth();
+        int imageHeight = scoreView.getDrawable().getIntrinsicHeight();
+        if (imageWidth < 1 || imageHeight < 1) return 1f;
+        return Math.min(scoreView.getWidth() / (float) imageWidth, scoreView.getHeight() / (float) imageHeight);
+    }
+
+    private void applyImageTransform() {
+        if (scoreView == null || scoreView.getDrawable() == null) return;
+        int imageWidth = scoreView.getDrawable().getIntrinsicWidth();
+        int imageHeight = scoreView.getDrawable().getIntrinsicHeight();
+        float scale = baseImageScale() * (editMode ? zoom : 1f);
+        float offsetX = (scoreView.getWidth() - imageWidth * scale) / 2f + (editMode ? panX : 0f);
+        float offsetY = (scoreView.getHeight() - imageHeight * scale) / 2f + (editMode ? panY : 0f);
+        imageMatrix.setScale(scale, scale);
+        imageMatrix.postTranslate(offsetX, offsetY);
+        scoreView.setImageMatrix(imageMatrix);
+    }
+
+    private void clampImagePan() {
+        if (scoreView == null || scoreView.getDrawable() == null || zoom <= 1f) { panX = 0f; panY = 0f; return; }
+        float scale = baseImageScale() * zoom;
+        float scaledWidth = scoreView.getDrawable().getIntrinsicWidth() * scale;
+        float scaledHeight = scoreView.getDrawable().getIntrinsicHeight() * scale;
+        float baseOffsetX = (scoreView.getWidth() - scoreView.getDrawable().getIntrinsicWidth() * baseImageScale()) / 2f;
+        float baseOffsetY = (scoreView.getHeight() - scoreView.getDrawable().getIntrinsicHeight() * baseImageScale()) / 2f;
+        float minX = scoreView.getWidth() - scaledWidth - baseOffsetX;
+        float maxX = -baseOffsetX;
+        float minY = scoreView.getHeight() - scaledHeight - baseOffsetY;
+        float maxY = -baseOffsetY;
+        panX = Math.max(minX, Math.min(maxX, panX));
+        panY = Math.max(minY, Math.min(maxY, panY));
+    }
+
     private void renderSystem() {
         refreshInfo();
         if (renderer == null || scoreView == null) return;
@@ -434,7 +813,10 @@ public class MainActivity extends Activity {
             if (!autoDetection) {
                 visibleSystemCount = 1;
                 refreshInfo();
-                scoreView.setImageBitmap(renderPageBitmap(pageIndex, width));
+                Bitmap page = renderPageBitmap(pageIndex, width);
+                if (editMode) drawManualOverlay(page, pageIndex);
+                scoreView.setImageBitmap(page);
+                applyImageTransform();
                 return;
             }
             PageSystems detected = getPageSystems(pageIndex, width);
@@ -483,6 +865,7 @@ public class MainActivity extends Activity {
             refreshInfo();
             Bitmap crop = composeSystems(visible, width, gapHeight);
             scoreView.setImageBitmap(crop);
+            applyImageTransform();
         } catch (Exception e) { Toast.makeText(this, "Seite konnte nicht dargestellt werden", Toast.LENGTH_SHORT).show(); }
     }
 
@@ -713,7 +1096,9 @@ public class MainActivity extends Activity {
         if (info == null) return;
         if (!autoDetection) {
             String filePosition = folderPdfIndex >= 0 ? "   •   PDF " + (folderPdfIndex + 1) + "/" + folderPdfs.size() : "";
-            info.setText(displayName + (renderer == null ? "" : "\nSeite " + (pageIndex + 1) + "/" + renderer.getPageCount() + filePosition + "   •   Seitenmodus"));
+            int markedSystems = manualPageRatios.containsKey(pageIndex) ? manualPageRatios.get(pageIndex).length / 2 : 0;
+            String mode = editMode ? "Bearbeiten • " + markedSystems + " Systeme" : "Seitenmodus";
+            info.setText(displayName + (renderer == null ? "" : "\nSeite " + (pageIndex + 1) + "/" + renderer.getPageCount() + filePosition + "   •   " + mode));
             return;
         }
         int count = currentSystemCount();
@@ -724,7 +1109,7 @@ public class MainActivity extends Activity {
     }
 
     @Override public void onWindowFocusChanged(boolean hasFocus) { super.onWindowFocusChanged(hasFocus); if (hasFocus) immersive(); }
-    @Override protected void onDestroy() { openRequestId++; uiHandler.removeCallbacks(hideControlsTask); closePdf(); super.onDestroy(); }
+    @Override protected void onDestroy() { openRequestId++; uiHandler.removeCallbacks(hideControlsTask); sidecarExecutor.shutdown(); closePdf(); super.onDestroy(); }
 }
 
 
