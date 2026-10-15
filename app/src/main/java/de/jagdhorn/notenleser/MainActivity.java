@@ -1,6 +1,7 @@
 package de.jagdhorn.notenleser;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Intent;
 import android.database.Cursor;
 import android.graphics.Bitmap;
@@ -16,6 +17,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.ParcelFileDescriptor;
 import android.provider.OpenableColumns;
+import android.provider.DocumentsContract;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
@@ -33,10 +35,12 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 
 public class MainActivity extends Activity {
     private static final int PICK_PDF = 41;
+    private static final int PICK_FOLDER = 42;
     private Uri pdfUri;
     private ParcelFileDescriptor descriptor;
     private PdfRenderer renderer;
@@ -48,6 +52,8 @@ public class MainActivity extends Activity {
     private int systemsPerPage = 4;
     private boolean autoDetection = true;
     private final List<PageSystems> pageSystems = new ArrayList<>();
+    private final List<Uri> folderPdfs = new ArrayList<>();
+    private int folderPdfIndex = -1;
     private final Handler uiHandler = new Handler();
     private final Runnable hideControlsTask = this::hideControls;
     private ImageView scoreView;
@@ -114,7 +120,7 @@ public class MainActivity extends Activity {
         info.setGravity(Gravity.CENTER_VERTICAL); info.setPadding(dp(4), dp(2), dp(4), dp(6));
         topOverlay.addView(info, new LinearLayout.LayoutParams(-1, -2));
         LinearLayout tools = new LinearLayout(this); tools.setGravity(Gravity.CENTER_VERTICAL);
-        TextView open = button("PDF öffnen", this::pickPdf);
+        TextView open = button("Öffnen", this::chooseSource);
         TextView minus = button("−", () -> changeSystemCount(-1));
         detectionButton = button("Auto an", this::toggleDetection);
         TextView plus = button("+", () -> changeSystemCount(1));
@@ -163,18 +169,78 @@ public class MainActivity extends Activity {
         } else showControls();
     }
 
+    private void chooseSource() {
+        new AlertDialog.Builder(this)
+                .setTitle("Noten öffnen")
+                .setItems(new String[]{"Einzelne PDF auswählen", "Ordner mit PDFs auswählen"}, (dialog, which) -> {
+                    if (which == 0) pickPdf(); else pickFolder();
+                }).show();
+    }
+
     private void pickPdf() {
         Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT); i.addCategory(Intent.CATEGORY_OPENABLE);
         i.setType("application/pdf"); i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
         startActivityForResult(i, PICK_PDF);
     }
 
+    private void pickFolder() {
+        Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+        i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+        startActivityForResult(i, PICK_FOLDER);
+    }
+
     @Override protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
+        if (request == PICK_FOLDER && result == RESULT_OK && data != null && data.getData() != null) {
+            Uri tree = data.getData();
+            try { getContentResolver().takePersistableUriPermission(tree, Intent.FLAG_GRANT_READ_URI_PERMISSION); } catch (Exception ignored) { }
+            new Thread(() -> loadFolderPdfs(tree), "notenleser-folder-loader").start();
+            return;
+        }
         if (request == PICK_PDF && result == RESULT_OK && data != null) {
             Uri u = data.getData();
             try { getContentResolver().takePersistableUriPermission(u, Intent.FLAG_GRANT_READ_URI_PERMISSION); } catch (Exception ignored) { }
+            folderPdfs.clear(); folderPdfIndex = -1;
             openPdf(u);
+        }
+    }
+
+    private void loadFolderPdfs(Uri tree) {
+        List<Uri> found = new ArrayList<>();
+        try {
+            String rootId = DocumentsContract.getTreeDocumentId(tree);
+            Uri children = DocumentsContract.buildChildDocumentsUriUsingTree(tree, rootId);
+            String[] columns = {DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                    DocumentsContract.Document.COLUMN_DISPLAY_NAME, DocumentsContract.Document.COLUMN_MIME_TYPE};
+            try (Cursor cursor = getContentResolver().query(children, columns, null, null, null)) {
+                if (cursor != null) {
+                    int idColumn = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DOCUMENT_ID);
+                    int nameColumn = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME);
+                    int mimeColumn = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_MIME_TYPE);
+                    while (cursor.moveToNext()) {
+                        String name = nameColumn >= 0 ? cursor.getString(nameColumn) : "";
+                        String mime = mimeColumn >= 0 ? cursor.getString(mimeColumn) : "";
+                        if (idColumn >= 0 && name != null && name.toLowerCase(java.util.Locale.ROOT).endsWith(".pdf")
+                                && !DocumentsContract.Document.MIME_TYPE_DIR.equals(mime)) {
+                            found.add(DocumentsContract.buildDocumentUriUsingTree(tree, cursor.getString(idColumn)));
+                        }
+                    }
+                }
+            }
+            found.sort(Comparator.comparing(this::queryDisplayName, String.CASE_INSENSITIVE_ORDER));
+            runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed()) return;
+                if (found.isEmpty()) {
+                    Toast.makeText(this, "In diesem Ordner wurden keine PDFs gefunden", Toast.LENGTH_LONG).show();
+                    return;
+                }
+                folderPdfs.clear(); folderPdfs.addAll(found); folderPdfIndex = 0;
+                openPdf(folderPdfs.get(0));
+                Toast.makeText(this, found.size() + " PDFs im Ordner gefunden", Toast.LENGTH_SHORT).show();
+            });
+        } catch (Exception e) {
+            String details = describeCause(e);
+            runOnUiThread(() -> Toast.makeText(this, "Ordner konnte nicht gelesen werden: " + details, Toast.LENGTH_LONG).show());
         }
     }
 
@@ -288,7 +354,11 @@ public class MainActivity extends Activity {
             int nextPage = autoDetection ? findScorePage(pageIndex + 1, 1) :
                     (pageIndex + 1 < renderer.getPageCount() ? pageIndex + 1 : -1);
             if (nextPage >= 0) { pageIndex = nextPage; systemIndex = 0; }
-            else Toast.makeText(this, "Ende der Noten", Toast.LENGTH_SHORT).show();
+            else if (folderPdfIndex >= 0 && folderPdfIndex + 1 < folderPdfs.size()) {
+                folderPdfIndex++;
+                openPdf(folderPdfs.get(folderPdfIndex));
+                return;
+            } else Toast.makeText(this, "Ende der Noten", Toast.LENGTH_SHORT).show();
         }
         renderSystem();
     }
@@ -299,7 +369,11 @@ public class MainActivity extends Activity {
         else {
             int previousPage = autoDetection ? findScorePage(pageIndex - 1, -1) : pageIndex - 1;
             if (previousPage >= 0) { pageIndex = previousPage; systemIndex = Math.max(0, currentSystemCount() - 1); }
-            else Toast.makeText(this, "Anfang der Noten", Toast.LENGTH_SHORT).show();
+            else if (folderPdfIndex > 0) {
+                folderPdfIndex--;
+                openPdf(folderPdfs.get(folderPdfIndex));
+                return;
+            } else Toast.makeText(this, "Anfang der Noten", Toast.LENGTH_SHORT).show();
         }
         renderSystem();
     }
@@ -585,7 +659,8 @@ public class MainActivity extends Activity {
         int count = currentSystemCount();
         boolean detected = autoDetection && pageIndex < pageSystems.size() && pageSystems.get(pageIndex) != null && pageSystems.get(pageIndex).count() > 0;
         String visible = visibleSystemCount > 1 ? "   •   " + visibleSystemCount + " im Bild" : "";
-        info.setText(displayName + (renderer == null ? "" : "\nSeite " + (pageIndex + 1) + "/" + renderer.getPageCount() + "   •   System " + (systemIndex + 1) + "/" + count + visible + (autoDetection ? (detected ? " Auto" : " Fallback") : " Manuell")));
+        String filePosition = folderPdfIndex >= 0 ? "   •   PDF " + (folderPdfIndex + 1) + "/" + folderPdfs.size() : "";
+        info.setText(displayName + (renderer == null ? "" : "\nSeite " + (pageIndex + 1) + "/" + renderer.getPageCount() + filePosition + "   •   System " + (systemIndex + 1) + "/" + count + visible + (autoDetection ? (detected ? " Auto" : " Fallback") : " Manuell")));
     }
 
     @Override public void onWindowFocusChanged(boolean hasFocus) { super.onWindowFocusChanged(hasFocus); if (hasFocus) immersive(); }
