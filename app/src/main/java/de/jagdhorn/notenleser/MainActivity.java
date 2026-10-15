@@ -65,6 +65,7 @@ public class MainActivity extends Activity {
     private int openRequestId = 0;
     private int systemsPerPage = 4;
     private boolean autoDetection = true;
+    private boolean advanceVisibleSystems;
     private boolean editMode;
     private final List<PageSystems> pageSystems = new ArrayList<>();
     private final List<Uri> folderPdfs = new ArrayList<>();
@@ -104,6 +105,7 @@ public class MainActivity extends Activity {
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         immersive();
         buildUi();
+        advanceVisibleSystems = getPreferences(MODE_PRIVATE).getBoolean("advance_visible_systems", false);
         String savedFolder = getPreferences(MODE_PRIVATE).getString("folder_tree", null);
         if (savedFolder != null) {
             Uri tree = Uri.parse(savedFolder);
@@ -224,13 +226,14 @@ public class MainActivity extends Activity {
         detectionButton = button("Auto an", this::toggleDetection);
         previousButton = button("‹", this::previous); previousButton.setContentDescription("Zurück");
         TextView next = button("›", this::next); next.setContentDescription("Weiter");
+        TextView options = button("⋯", this::showOptions); options.setContentDescription("Optionen");
         editButton = button("Bearb.", this::toggleEditMode);
         undoButton = button("↶", this::undoManualSystem); undoButton.setContentDescription("Ausgewähltes System entfernen");
         clearButton = button("×", this::clearManualSystems); clearButton.setContentDescription("Systeme dieser Seite löschen");
         undoButton.setVisibility(View.GONE); clearButton.setVisibility(View.GONE);
         previousButton.setTextSize(22); next.setTextSize(22);
         previousButton.setPadding(dp(4), dp(10), dp(4), dp(10)); next.setPadding(dp(4), dp(10), dp(4), dp(10));
-        addTool(tools, open); addTool(tools, previousButton); addTool(tools, detectionButton); addTool(tools, next);
+        addTool(tools, open); addTool(tools, previousButton); addTool(tools, detectionButton); addTool(tools, next); addTool(tools, options);
         addTool(tools, editButton); addTool(tools, undoButton); addTool(tools, clearButton);
         topOverlay.addView(tools, new LinearLayout.LayoutParams(-2, -2));
         FrameLayout.LayoutParams topParams = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.LEFT);
@@ -277,6 +280,26 @@ public class MainActivity extends Activity {
                 .setItems(new String[]{"Einzelne PDF auswählen", "Ordner mit PDFs auswählen"}, (dialog, which) -> {
                     if (which == 0) pickPdf(); else pickFolder();
                 }).show();
+    }
+
+    private void showOptions() {
+        android.widget.CheckBox allVisible = new android.widget.CheckBox(this);
+        allVisible.setText("Beim Blättern alle sichtbaren Systeme weiterschalten");
+        allVisible.setTextColor(Color.WHITE);
+        allVisible.setButtonTintList(android.content.res.ColorStateList.valueOf(Color.WHITE));
+        allVisible.setChecked(advanceVisibleSystems);
+        int padding = dp(20);
+        allVisible.setPadding(padding, dp(8), padding, dp(8));
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Optionen")
+                .setView(allVisible)
+                .setPositiveButton("Schließen", null)
+                .create();
+        dialog.setOnDismissListener(ignored -> {
+                    advanceVisibleSystems = allVisible.isChecked();
+                    getPreferences(MODE_PRIVATE).edit().putBoolean("advance_visible_systems", advanceVisibleSystems).apply();
+                });
+        dialog.show();
     }
 
     private void pickPdf() {
@@ -763,8 +786,9 @@ public class MainActivity extends Activity {
 
     private void next() {
         if (renderer == null) { pickPdf(); return; }
-        if (autoDetection && systemIndex + 1 < currentSystemCount()) {
-            systemIndex++;
+        int step = advanceVisibleSystems ? Math.max(1, visibleSystemCount) : 1;
+        if (autoDetection && systemIndex + step < currentSystemCount()) {
+            systemIndex += step;
             renderSystem();
             return;
         }
@@ -782,13 +806,14 @@ public class MainActivity extends Activity {
     private void previous() {
         if (editMode) { undoManualEdit(); return; }
         if (renderer == null) { pickPdf(); return; }
+        int step = advanceVisibleSystems ? Math.max(1, visibleSystemCount) : 1;
         if (autoDetection && systemIndex > 0) {
-            systemIndex--;
+            systemIndex = Math.max(0, systemIndex - step);
             renderSystem();
             return;
         }
         int previousPage = autoDetection ? findScorePage(pageIndex - 1, -1) : pageIndex - 1;
-        if (previousPage >= 0) { pageIndex = previousPage; systemIndex = autoDetection ? Math.max(0, currentSystemCount() - 1) : 0; }
+        if (previousPage >= 0) { pageIndex = previousPage; systemIndex = autoDetection ? Math.max(0, currentSystemCount() - step) : 0; }
         else if (folderPdfIndex > 0) {
             folderPdfIndex--;
             openPdf(folderPdfs.get(folderPdfIndex), true);
