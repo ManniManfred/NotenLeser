@@ -140,13 +140,15 @@ public class MainActivity extends Activity {
                 if (Math.abs(newZoom - oldZoom) < .001f) return true;
                 float focusX = detector.getFocusX(), focusY = detector.getFocusY();
                 float baseScale = baseImageScale();
-                float offsetX = (scoreView.getWidth() - scoreView.getDrawable().getIntrinsicWidth() * baseScale) / 2f;
-                float offsetY = (scoreView.getHeight() - scoreView.getDrawable().getIntrinsicHeight() * baseScale) / 2f;
-                float imageX = (focusX - offsetX - panX) / (baseScale * oldZoom);
-                float imageY = (focusY - offsetY - panY) / (baseScale * oldZoom);
+                float oldOffsetX = (scoreView.getWidth() - scoreView.getDrawable().getIntrinsicWidth() * baseScale * oldZoom) / 2f;
+                float oldOffsetY = (scoreView.getHeight() - scoreView.getDrawable().getIntrinsicHeight() * baseScale * oldZoom) / 2f;
+                float imageX = (focusX - oldOffsetX - panX) / (baseScale * oldZoom);
+                float imageY = (focusY - oldOffsetY - panY) / (baseScale * oldZoom);
                 zoom = newZoom;
-                panX = focusX - offsetX - imageX * baseScale * zoom;
-                panY = focusY - offsetY - imageY * baseScale * zoom;
+                float newOffsetX = (scoreView.getWidth() - scoreView.getDrawable().getIntrinsicWidth() * baseScale * zoom) / 2f;
+                float newOffsetY = (scoreView.getHeight() - scoreView.getDrawable().getIntrinsicHeight() * baseScale * zoom) / 2f;
+                panX = focusX - newOffsetX - imageX * baseScale * zoom;
+                panY = focusY - newOffsetY - imageY * baseScale * zoom;
                 if (zoom == 1f) { panX = 0f; panY = 0f; }
                 clampImagePan();
                 applyImageTransform();
@@ -794,12 +796,13 @@ public class MainActivity extends Activity {
         float scale = baseImageScale() * zoom;
         float scaledWidth = scoreView.getDrawable().getIntrinsicWidth() * scale;
         float scaledHeight = scoreView.getDrawable().getIntrinsicHeight() * scale;
-        float baseOffsetX = (scoreView.getWidth() - scoreView.getDrawable().getIntrinsicWidth() * baseImageScale()) / 2f;
-        float baseOffsetY = (scoreView.getHeight() - scoreView.getDrawable().getIntrinsicHeight() * baseImageScale()) / 2f;
-        float minX = scoreView.getWidth() - scaledWidth - baseOffsetX;
-        float maxX = -baseOffsetX;
-        float minY = scoreView.getHeight() - scaledHeight - baseOffsetY;
-        float maxY = -baseOffsetY;
+        float centeredOffsetX = (scoreView.getWidth() - scaledWidth) / 2f;
+        float centeredOffsetY = (scoreView.getHeight() - scaledHeight) / 2f;
+        float overscroll = dp(64);
+        float minX = scoreView.getWidth() - scaledWidth - centeredOffsetX - overscroll;
+        float maxX = -centeredOffsetX + overscroll;
+        float minY = scoreView.getHeight() - scaledHeight - centeredOffsetY - overscroll;
+        float maxY = -centeredOffsetY + overscroll;
         panX = Math.max(minX, Math.min(maxX, panX));
         panY = Math.max(minY, Math.min(maxY, panY));
     }
