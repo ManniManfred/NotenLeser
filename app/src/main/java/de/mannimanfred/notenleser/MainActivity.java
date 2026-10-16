@@ -85,6 +85,7 @@ public class MainActivity extends Activity {
     private TextView undoButton;
     private TextView clearButton;
     private LinearLayout topOverlay;
+    private LinearLayout startPage;
     private String displayName = "Keine Noten geöffnet";
     private float touchY;
     private float touchX;
@@ -214,6 +215,37 @@ public class MainActivity extends Activity {
         });
         root.addView(scoreView, new FrameLayout.LayoutParams(-1, -1));
 
+        startPage = new LinearLayout(this);
+        startPage.setOrientation(LinearLayout.VERTICAL);
+        startPage.setGravity(Gravity.CENTER);
+        startPage.setPadding(dp(28), dp(28), dp(28), dp(28));
+        startPage.setBackgroundColor(Color.rgb(20, 24, 29));
+        TextView emblem = new TextView(this);
+        emblem.setText("♫"); emblem.setTextSize(54); emblem.setTextColor(Color.rgb(221, 190, 116));
+        emblem.setGravity(Gravity.CENTER);
+        startPage.addView(emblem, new LinearLayout.LayoutParams(-2, -2));
+        TextView heading = new TextView(this);
+        heading.setText("NotenLeser"); heading.setTextSize(30); heading.setTextColor(Color.WHITE);
+        heading.setGravity(Gravity.CENTER); heading.setTypeface(android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL));
+        LinearLayout.LayoutParams headingParams = new LinearLayout.LayoutParams(-2, -2);
+        headingParams.topMargin = dp(8); startPage.addView(heading, headingParams);
+        TextView intro = new TextView(this);
+        intro.setText("Öffne eine Noten-PDF oder wähle einen Ordner mit mehreren PDFs.");
+        intro.setTextSize(16); intro.setTextColor(Color.rgb(190, 197, 205)); intro.setGravity(Gravity.CENTER);
+        intro.setMaxWidth(dp(360));
+        LinearLayout.LayoutParams introParams = new LinearLayout.LayoutParams(-2, -2);
+        introParams.topMargin = dp(10); introParams.bottomMargin = dp(28); startPage.addView(intro, introParams);
+        TextView openPdf = button("PDF öffnen", this::pickPdf);
+        openPdf.setTextSize(16); openPdf.setBackground(startActionBackground(true));
+        LinearLayout.LayoutParams actionParams = new LinearLayout.LayoutParams(dp(260), dp(54));
+        startPage.addView(openPdf, actionParams);
+        TextView openFolder = button("Ordner öffnen", this::pickFolder);
+        openFolder.setTextSize(16); openFolder.setBackground(startActionBackground(false));
+        LinearLayout.LayoutParams folderParams = new LinearLayout.LayoutParams(dp(260), dp(54));
+        folderParams.topMargin = dp(12); startPage.addView(openFolder, folderParams);
+        FrameLayout.LayoutParams startParams = new FrameLayout.LayoutParams(-1, -1);
+        root.addView(startPage, startParams);
+
         topOverlay = new LinearLayout(this); topOverlay.setOrientation(LinearLayout.VERTICAL);
         topOverlay.setPadding(dp(12), dp(8), dp(12), dp(8)); topOverlay.setBackground(panelBackground());
         info = new TextView(this); info.setTextColor(Color.WHITE); info.setTextSize(14);
@@ -243,6 +275,14 @@ public class MainActivity extends Activity {
         setContentView(root); refreshInfo(); showControls();
     }
 
+    private GradientDrawable startActionBackground(boolean primary) {
+        GradientDrawable shape = new GradientDrawable();
+        shape.setColor(primary ? Color.rgb(174, 132, 57) : Color.rgb(44, 52, 61));
+        shape.setCornerRadius(dp(14));
+        if (!primary) shape.setStroke(dp(1), Color.rgb(92, 103, 114));
+        return shape;
+    }
+
     private void addTool(LinearLayout row, View child) {
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
         lp.setMargins(dp(3), 0, dp(3), 0); row.addView(child, lp);
@@ -258,6 +298,7 @@ public class MainActivity extends Activity {
 
     private void showControls() {
         if (topOverlay == null) return;
+        if (renderer == null) { topOverlay.setVisibility(View.GONE); return; }
         uiHandler.removeCallbacks(hideControlsTask);
         topOverlay.setVisibility(View.VISIBLE); topOverlay.animate().cancel(); topOverlay.setAlpha(1f);
         uiHandler.postDelayed(hideControlsTask, 3500);
@@ -517,6 +558,7 @@ public class MainActivity extends Activity {
                     if (lastScorePage >= 0) pageIndex = lastScorePage;
                 }
                 getPreferences(MODE_PRIVATE).edit().putString("pdf", uri.toString()).apply();
+                showControls();
                 renderSystem();
             });
         } catch (Exception e) {
@@ -1229,6 +1271,8 @@ public class MainActivity extends Activity {
     }
 
     private void refreshInfo() {
+        if (startPage != null) startPage.setVisibility(renderer == null ? View.VISIBLE : View.GONE);
+        if (topOverlay != null && renderer == null) topOverlay.setVisibility(View.GONE);
         if (info == null) return;
         if (!autoDetection) {
             String filePosition = folderPdfIndex >= 0 ? "   •   PDF " + (folderPdfIndex + 1) + "/" + folderPdfs.size() : "";
