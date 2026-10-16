@@ -1,12 +1,12 @@
 plugins { id 'com.android.application' }
 
 android {
-    namespace 'de.jagdhorn.notenleser'
-    compileSdk 35
+    namespace 'de.mannimanfred.notenleser'
+    compileSdk 36
     defaultConfig {
-        applicationId 'de.jagdhorn.notenleser'
+        applicationId 'de.mannimanfred.notenleser'
         minSdk 23
-        targetSdk 35
+        targetSdk 36
         versionCode 1
         versionName '0.1.0'
     }

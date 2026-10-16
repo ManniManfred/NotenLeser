@@ -1,4 +1,4 @@
-package de.jagdhorn.notenleser;
+package de.mannimanfred.notenleser;
 
 import android.app.Activity;
 import android.app.AlertDialog;
