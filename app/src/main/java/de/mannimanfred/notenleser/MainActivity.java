@@ -106,7 +106,7 @@ public class MainActivity extends Activity {
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         immersive();
         buildUi();
-        advanceVisibleSystems = getPreferences(MODE_PRIVATE).getBoolean("advance_visible_systems", false);
+        advanceVisibleSystems = getPreferences(MODE_PRIVATE).getBoolean("advance_visible_systems", true);
         String savedFolder = getPreferences(MODE_PRIVATE).getString("folder_tree", null);
         if (savedFolder != null) {
             Uri tree = Uri.parse(savedFolder);
