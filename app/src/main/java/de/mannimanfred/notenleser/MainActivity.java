@@ -53,6 +53,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public class MainActivity extends Activity {
+    private enum PagingMode { SYSTEM, PAGE, VISIBLE_SYSTEMS }
+
     private static final int PICK_PDF = 41;
     private static final int PICK_FOLDER = 42;
     private Uri pdfUri;
@@ -65,7 +67,7 @@ public class MainActivity extends Activity {
     private int openRequestId = 0;
     private int systemsPerPage = 4;
     private boolean autoDetection = true;
-    private boolean advanceVisibleSystems;
+    private PagingMode pagingMode = PagingMode.VISIBLE_SYSTEMS;
     private boolean editMode;
     private final List<PageSystems> pageSystems = new ArrayList<>();
     private final List<Uri> folderPdfs = new ArrayList<>();
@@ -106,7 +108,15 @@ public class MainActivity extends Activity {
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         immersive();
         buildUi();
-        advanceVisibleSystems = getPreferences(MODE_PRIVATE).getBoolean("advance_visible_systems", true);
+        android.content.SharedPreferences preferences = getPreferences(MODE_PRIVATE);
+        String savedPagingMode = preferences.getString("paging_mode", null);
+        if (savedPagingMode != null) {
+            try { pagingMode = PagingMode.valueOf(savedPagingMode); }
+            catch (IllegalArgumentException ignored) { pagingMode = PagingMode.VISIBLE_SYSTEMS; }
+        } else {
+            pagingMode = preferences.getBoolean("advance_visible_systems", true)
+                    ? PagingMode.VISIBLE_SYSTEMS : PagingMode.SYSTEM;
+        }
         String savedFolder = getPreferences(MODE_PRIVATE).getString("folder_tree", null);
         if (savedFolder != null) {
             Uri tree = Uri.parse(savedFolder);
@@ -324,23 +334,18 @@ public class MainActivity extends Activity {
     }
 
     private void showOptions() {
-        android.widget.CheckBox allVisible = new android.widget.CheckBox(this);
-        allVisible.setText("Beim Blättern alle sichtbaren Systeme weiterschalten");
-        allVisible.setTextColor(Color.BLACK);
-        allVisible.setButtonTintList(android.content.res.ColorStateList.valueOf(Color.rgb(40, 105, 160)));
-        allVisible.setChecked(advanceVisibleSystems);
-        int padding = dp(20);
-        allVisible.setPadding(padding, dp(8), padding, dp(8));
-        AlertDialog dialog = new AlertDialog.Builder(this)
+        String[] labels = {"System einzeln", "Seitenweise", "Alle sichtbaren Systeme"};
+        new AlertDialog.Builder(this)
                 .setTitle("Optionen")
-                .setView(allVisible)
-                .setPositiveButton("Schließen", null)
-                .create();
-        dialog.setOnDismissListener(ignored -> {
-                    advanceVisibleSystems = allVisible.isChecked();
-                    getPreferences(MODE_PRIVATE).edit().putBoolean("advance_visible_systems", advanceVisibleSystems).apply();
-                });
-        dialog.show();
+                .setSingleChoiceItems(labels, pagingMode.ordinal(), (dialog, which) -> {
+                    pagingMode = PagingMode.values()[which];
+                    getPreferences(MODE_PRIVATE).edit().putString("paging_mode", pagingMode.name()).remove("advance_visible_systems").apply();
+                    systemIndex = 0;
+                    renderSystem();
+                    dialog.dismiss();
+                })
+                .setNegativeButton("Schließen", null)
+                .show();
     }
 
     private void pickPdf() {
@@ -828,13 +833,14 @@ public class MainActivity extends Activity {
 
     private void next() {
         if (renderer == null) { pickPdf(); return; }
-        int step = advanceVisibleSystems ? Math.max(1, visibleSystemCount) : 1;
-        if (autoDetection && systemIndex + step < currentSystemCount()) {
+        int step = pagingMode == PagingMode.VISIBLE_SYSTEMS ? Math.max(1, visibleSystemCount) : 1;
+        boolean systemPaging = autoDetection && pagingMode != PagingMode.PAGE;
+        if (systemPaging && systemIndex + step < currentSystemCount()) {
             systemIndex += step;
             renderSystem();
             return;
         }
-        int nextPage = autoDetection ? findScorePage(pageIndex + 1, 1) :
+        int nextPage = systemPaging ? findScorePage(pageIndex + 1, 1) :
                 (pageIndex + 1 < renderer.getPageCount() ? pageIndex + 1 : -1);
         if (nextPage >= 0) { pageIndex = nextPage; systemIndex = 0; }
         else if (folderPdfIndex >= 0 && folderPdfIndex + 1 < folderPdfs.size()) {
@@ -848,14 +854,15 @@ public class MainActivity extends Activity {
     private void previous() {
         if (editMode) { undoManualEdit(); return; }
         if (renderer == null) { pickPdf(); return; }
-        int step = advanceVisibleSystems ? Math.max(1, visibleSystemCount) : 1;
-        if (autoDetection && systemIndex > 0) {
+        int step = pagingMode == PagingMode.VISIBLE_SYSTEMS ? Math.max(1, visibleSystemCount) : 1;
+        boolean systemPaging = autoDetection && pagingMode != PagingMode.PAGE;
+        if (systemPaging && systemIndex > 0) {
             systemIndex = Math.max(0, systemIndex - step);
             renderSystem();
             return;
         }
-        int previousPage = autoDetection ? findScorePage(pageIndex - 1, -1) : pageIndex - 1;
-        if (previousPage >= 0) { pageIndex = previousPage; systemIndex = autoDetection ? Math.max(0, currentSystemCount() - step) : 0; }
+        int previousPage = systemPaging ? findScorePage(pageIndex - 1, -1) : pageIndex - 1;
+        if (previousPage >= 0) { pageIndex = previousPage; systemIndex = systemPaging ? Math.max(0, currentSystemCount() - step) : 0; }
         else if (folderPdfIndex > 0) {
             folderPdfIndex--;
             openPdf(folderPdfs.get(folderPdfIndex), true);
@@ -982,7 +989,7 @@ public class MainActivity extends Activity {
         if (scoreView.getWidth() < 1 || scoreView.getHeight() < 1) { scoreView.post(this::renderSystem); return; }
         try {
             int width = Math.max(scoreView.getWidth(), 1200);
-            if (!autoDetection) {
+            if (!autoDetection || pagingMode == PagingMode.PAGE) {
                 visibleSystemCount = 1;
                 refreshInfo();
                 Bitmap page = renderPageBitmap(pageIndex, width);
@@ -1274,7 +1281,7 @@ public class MainActivity extends Activity {
         if (startPage != null) startPage.setVisibility(renderer == null ? View.VISIBLE : View.GONE);
         if (topOverlay != null && renderer == null) topOverlay.setVisibility(View.GONE);
         if (info == null) return;
-        if (!autoDetection) {
+        if (!autoDetection || pagingMode == PagingMode.PAGE) {
             String filePosition = folderPdfIndex >= 0 ? "   •   PDF " + (folderPdfIndex + 1) + "/" + folderPdfs.size() : "";
             int markedSystems = manualPageRatios.containsKey(pageIndex) ? manualPageRatios.get(pageIndex).length / 2 : 0;
             String mode = editMode ? "Bearbeiten • " + markedSystems + " Systeme" : "Seitenmodus";
