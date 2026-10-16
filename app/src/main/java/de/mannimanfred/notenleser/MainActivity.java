@@ -326,8 +326,8 @@ public class MainActivity extends Activity {
     private void showOptions() {
         android.widget.CheckBox allVisible = new android.widget.CheckBox(this);
         allVisible.setText("Beim Blättern alle sichtbaren Systeme weiterschalten");
-        allVisible.setTextColor(Color.WHITE);
-        allVisible.setButtonTintList(android.content.res.ColorStateList.valueOf(Color.WHITE));
+        allVisible.setTextColor(Color.BLACK);
+        allVisible.setButtonTintList(android.content.res.ColorStateList.valueOf(Color.rgb(40, 105, 160)));
         allVisible.setChecked(advanceVisibleSystems);
         int padding = dp(20);
         allVisible.setPadding(padding, dp(8), padding, dp(8));
