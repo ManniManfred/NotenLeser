@@ -64,6 +64,7 @@ public class MainActivity extends Activity {
     private int pageIndex = 0;
     private int systemIndex = 0;
     private int visibleSystemCount = 1;
+    private List<SystemRef> visibleSystems = new ArrayList<>();
     private int openRequestId = 0;
     private int systemsPerPage = 4;
     private boolean autoDetection = true;
@@ -833,15 +834,26 @@ public class MainActivity extends Activity {
 
     private void next() {
         if (renderer == null) { pickPdf(); return; }
-        int step = pagingMode == PagingMode.VISIBLE_SYSTEMS ? Math.max(1, visibleSystemCount) : 1;
         boolean systemPaging = autoDetection && pagingMode != PagingMode.PAGE;
-        if (systemPaging && systemIndex + step < currentSystemCount()) {
-            systemIndex += step;
-            renderSystem();
-            return;
+        List<SystemRef> shown = currentVisibleSystems();
+        int nextPage;
+        if (shown != null) {
+            SystemRef next = adjacentSystem(shown.get(shown.size() - 1), 1, Math.max(scoreView.getWidth(), 1200));
+            if (next != null) {
+                pageIndex = next.page; systemIndex = next.index;
+                renderSystem();
+                return;
+            }
+            nextPage = -1;
+        } else {
+            if (systemPaging && systemIndex + 1 < currentSystemCount()) {
+                systemIndex++;
+                renderSystem();
+                return;
+            }
+            nextPage = systemPaging ? findScorePage(pageIndex + 1, 1) :
+                    (pageIndex + 1 < renderer.getPageCount() ? pageIndex + 1 : -1);
         }
-        int nextPage = systemPaging ? findScorePage(pageIndex + 1, 1) :
-                (pageIndex + 1 < renderer.getPageCount() ? pageIndex + 1 : -1);
         if (nextPage >= 0) { pageIndex = nextPage; systemIndex = 0; }
         else if (folderPdfIndex >= 0 && folderPdfIndex + 1 < folderPdfs.size()) {
             folderPdfIndex++;
@@ -854,15 +866,28 @@ public class MainActivity extends Activity {
     private void previous() {
         if (editMode) { undoManualEdit(); return; }
         if (renderer == null) { pickPdf(); return; }
-        int step = pagingMode == PagingMode.VISIBLE_SYSTEMS ? Math.max(1, visibleSystemCount) : 1;
         boolean systemPaging = autoDetection && pagingMode != PagingMode.PAGE;
-        if (systemPaging && systemIndex > 0) {
-            systemIndex = Math.max(0, systemIndex - step);
-            renderSystem();
-            return;
+        List<SystemRef> shown = currentVisibleSystems();
+        int previousPage;
+        if (shown != null) {
+            int width = Math.max(scoreView.getWidth(), 1200);
+            SystemRef previous = adjacentSystem(shown.get(0), -1, width);
+            if (previous != null) {
+                SystemRef first = screenStartingBefore(previous, width);
+                pageIndex = first.page; systemIndex = first.index;
+                renderSystem();
+                return;
+            }
+            previousPage = -1;
+        } else {
+            if (systemPaging && systemIndex > 0) {
+                systemIndex--;
+                renderSystem();
+                return;
+            }
+            previousPage = systemPaging ? findScorePage(pageIndex - 1, -1) : pageIndex - 1;
         }
-        int previousPage = systemPaging ? findScorePage(pageIndex - 1, -1) : pageIndex - 1;
-        if (previousPage >= 0) { pageIndex = previousPage; systemIndex = systemPaging ? Math.max(0, currentSystemCount() - step) : 0; }
+        if (previousPage >= 0) { pageIndex = previousPage; systemIndex = systemPaging ? Math.max(0, currentSystemCount() - 1) : 0; }
         else if (folderPdfIndex > 0) {
             folderPdfIndex--;
             openPdf(folderPdfs.get(folderPdfIndex), true);
@@ -991,6 +1016,7 @@ public class MainActivity extends Activity {
             int width = Math.max(scoreView.getWidth(), 1200);
             if (!autoDetection || pagingMode == PagingMode.PAGE) {
                 visibleSystemCount = 1;
+                visibleSystems = new ArrayList<>();
                 refreshInfo();
                 Bitmap page = renderPageBitmap(pageIndex, width);
                 if (editMode) drawManualOverlay(page, pageIndex);
@@ -1012,14 +1038,17 @@ public class MainActivity extends Activity {
             SystemRef current = systemRef(pageIndex, systemIndex, width);
             if (current == null) return;
             ArrayList<SystemRef> before = new ArrayList<>(), after = new ArrayList<>();
-            int maxCropHeight = Math.round(scoreView.getHeight() * (width / (float) scoreView.getWidth()));
-            int gapHeight = Math.max(4, Math.round(width * dp(7) / (float) scoreView.getWidth()));
+            int maxCropHeight = maxCropHeight(width);
+            int gapHeight = gapHeight(width);
             int usedHeight = current.height();
             SystemRef previousCursor = current, nextCursor = current;
             boolean canLookBack = true, canLookForward = true;
+            // Visible-system paging anchors the current system at the top so the next
+            // page starts exactly after the last system shown.
+            boolean anchorTop = pagingMode == PagingMode.VISIBLE_SYSTEMS;
             while (true) {
                 boolean added = false;
-                if (canLookBack) {
+                if (canLookBack && (!anchorTop || !canLookForward)) {
                     SystemRef candidate = adjacentSystem(previousCursor, -1, width);
                     if (candidate == null) canLookBack = false;
                     else if (usedHeight + gapHeight + candidate.height() <= maxCropHeight) {
@@ -1035,17 +1064,47 @@ public class MainActivity extends Activity {
                         usedHeight += gapHeight + candidate.height(); added = true;
                     } else canLookForward = false;
                 }
-                if (!added) break;
+                if (!added && !(anchorTop && canLookBack)) break;
             }
             ArrayList<SystemRef> visible = new ArrayList<>();
             for (int i = before.size() - 1; i >= 0; i--) visible.add(before.get(i));
             visible.add(current); visible.addAll(after);
+            visibleSystems = visible;
             visibleSystemCount = visible.size();
             refreshInfo();
             Bitmap crop = composeSystems(visible, width, gapHeight);
             scoreView.setImageBitmap(crop);
             applyImageTransform();
         } catch (Exception e) { Toast.makeText(this, "Seite konnte nicht dargestellt werden", Toast.LENGTH_SHORT).show(); }
+    }
+
+    private int maxCropHeight(int width) {
+        return Math.round(scoreView.getHeight() * (width / (float) scoreView.getWidth()));
+    }
+
+    private int gapHeight(int width) {
+        return Math.max(4, Math.round(width * dp(7) / (float) scoreView.getWidth()));
+    }
+
+    /** Returns the shown systems if they still belong to the current position, otherwise null. */
+    private List<SystemRef> currentVisibleSystems() {
+        if (!autoDetection || pagingMode != PagingMode.VISIBLE_SYSTEMS || visibleSystems.isEmpty()) return null;
+        for (SystemRef system : visibleSystems)
+            if (system.page == pageIndex && system.index == systemIndex) return visibleSystems;
+        return null;
+    }
+
+    /** Finds the earliest system of a screen that ends with the given system. */
+    private SystemRef screenStartingBefore(SystemRef last, int width) {
+        int maxCropHeight = maxCropHeight(width), gapHeight = gapHeight(width);
+        int usedHeight = last.height();
+        SystemRef first = last;
+        while (true) {
+            SystemRef candidate = adjacentSystem(first, -1, width);
+            if (candidate == null || usedHeight + gapHeight + candidate.height() > maxCropHeight) return first;
+            usedHeight += gapHeight + candidate.height();
+            first = candidate;
+        }
     }
 
     private int systemCount(int page, PageSystems detected) {
