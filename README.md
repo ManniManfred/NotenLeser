@@ -10,16 +10,16 @@ Native Android-App zum Lesen von Noten (PDF und MuseScore) im Vollbild. Die Date
 - Abgerundete, dunkle Bedienelemente mit Titel und Statuszeile liegen über der Notenseite und blenden sich nach 3,5 Sekunden ohne Eingabe aus. Tippen auf die Seite blendet sie wieder ein.
 - Der PDF-Titel wird aus den Dateimetadaten des Dateianbieters gelesen; die Nextcloud-interne URI erscheint nicht als Dateiname.
 - Tippen auf „Noten öffnen“, um eine PDF- oder MuseScore-Datei auszuwählen. Im Ordnermodus werden `.pdf`, `.mscz` und `.mscx` gelistet.
-- Wischen nach links/rechts wechselt das System. Am Seitenende springt die App auf die nächste PDF-Seite.
+- Wischen mit einem Finger nach links/rechts wechselt das System, Wischen mit zwei Fingern blättert um alle sichtbaren Systeme weiter. Am Seitenende springt die App auf die nächste PDF-Seite.
 - Wischen nach oben/unten wechselt zur nächsten bzw. vorherigen PDF im geöffneten Ordner; ein kurzes Hinweisfeld zeigt Titel und Position.
 - Im Bearbeitungsmodus (Wischen markiert dort Systeme) blättern die Tasten ‹/› seitenweise.
 - Die App erkennt Notenzeilen (fünf waagerechte Linien), fasst sie zu Systemen zusammen und navigiert zwischen erkannten Systemen.
 - Wenn der Bildschirm Platz bietet, werden mehrere aufeinanderfolgende Systeme gleichzeitig angezeigt, auch über Seitengrenzen hinweg. Navigation verschiebt den sichtbaren Ausschnitt jeweils um ein System.
 - Angezeigte Systeme sind mit Seiten- und Systemnummer im Format „Seite·System“ markiert und durch dezente Linien getrennt. Die Statuszeile zeigt aktuelle und gesamte Seitenzahl.
 - PDF-Seiten ohne erkannte Notensysteme (zum Beispiel Deckblätter) werden bei aktivierter Auto-Erkennung beim Blättern übersprungen.
-- Über „Auto“ kann auf manuelle Seiteneinteilung umgeschaltet werden. Dann lässt sich die Zahl der Abschnitte mit −/+ einstellen (1 bis 12; Standard 4).
+- Die Taste „System“ schaltet auf „Seitenweise“ um; dann wird jeweils die ganze PDF-Seite angezeigt und geblättert.
 
-Die automatische Erkennung (`SystemDetector`) sucht Notenzeilen abschnittsweise in schmalen senkrechten Streifen. Dadurch werden auch eingerückte oder verkürzte Zeilen sowie leicht schiefe oder gewölbte Scans erkannt. Benachbarte Notenzeilen gehören zu einem System, wenn sie links durch Systemstrich, Klammer oder Akkolade verbunden sind oder ein Taktstrich durch den Zwischenraum läuft; Stimmauszüge ohne solche Verbindung werden zeilenweise geblättert. Jeder Ausschnitt reicht bis zur nächsten Leerzone, sodass Dynamik, Volten und Taktnummern sichtbar bleiben. Bei ungewöhnlichem Layout oder sehr blassen Linien kann sie danebenliegen; dann auf „Auto aus“ umschalten und die manuelle Einteilung verwenden. Die Kameragestenerkennung ist als nächster Ausbauschritt vorgesehen und noch nicht implementiert.
+Die automatische Erkennung (`SystemDetector`) sucht Notenzeilen abschnittsweise in schmalen senkrechten Streifen. Dadurch werden auch eingerückte oder verkürzte Zeilen sowie leicht schiefe oder gewölbte Scans erkannt. Benachbarte Notenzeilen gehören zu einem System, wenn sie links durch Systemstrich, Klammer oder Akkolade verbunden sind oder ein Taktstrich durch den Zwischenraum läuft; Stimmauszüge ohne solche Verbindung werden zeilenweise geblättert. Jeder Ausschnitt reicht bis zur nächsten Leerzone, sodass Dynamik, Volten und Taktnummern sichtbar bleiben. Bei ungewöhnlichem Layout oder sehr blassen Linien kann sie danebenliegen; dann auf „Seitenweise“ umschalten oder die Systeme im Bearbeitungsmodus selbst markieren. Die Kameragestenerkennung ist als nächster Ausbauschritt vorgesehen und noch nicht implementiert.
 
 ## In Android Studio öffnen
 

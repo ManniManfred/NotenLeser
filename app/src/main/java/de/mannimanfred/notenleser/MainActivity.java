@@ -50,7 +50,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public class MainActivity extends Activity {
-    private enum PagingMode { SYSTEM, PAGE, VISIBLE_SYSTEMS }
 
     private static final int PICK_PDF = 41;
     private static final int PICK_FOLDER = 42;
@@ -63,7 +62,6 @@ public class MainActivity extends Activity {
     private int openRequestId = 0;
     private int systemsPerPage = 4;
     private boolean autoDetection = true;
-    private PagingMode pagingMode = PagingMode.VISIBLE_SYSTEMS;
     private boolean editMode;
     private final List<PageSystems> pageSystems = new ArrayList<>();
     private final List<Uri> folderPdfs = new ArrayList<>();
@@ -102,6 +100,9 @@ public class MainActivity extends Activity {
     private float panX;
     private float panY;
     private boolean multiTouchGesture;
+    private float twoFingerStartX;
+    private float twoFingerStartY;
+    private boolean twoFingerHandled;
     private final Matrix imageMatrix = new Matrix();
     private ScaleGestureDetector scaleGestureDetector;
 
@@ -110,15 +111,6 @@ public class MainActivity extends Activity {
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         immersive();
         buildUi();
-        android.content.SharedPreferences preferences = getPreferences(MODE_PRIVATE);
-        String savedPagingMode = preferences.getString("paging_mode", null);
-        if (savedPagingMode != null) {
-            try { pagingMode = PagingMode.valueOf(savedPagingMode); }
-            catch (IllegalArgumentException ignored) { pagingMode = PagingMode.VISIBLE_SYSTEMS; }
-        } else {
-            pagingMode = preferences.getBoolean("advance_visible_systems", true)
-                    ? PagingMode.VISIBLE_SYSTEMS : PagingMode.SYSTEM;
-        }
         String savedFolder = getPreferences(MODE_PRIVATE).getString("folder_tree", null);
         if (savedFolder != null) {
             Uri tree = Uri.parse(savedFolder);
@@ -195,6 +187,20 @@ public class MainActivity extends Activity {
             }
             if (e.getActionMasked() == MotionEvent.ACTION_POINTER_DOWN) {
                 multiTouchGesture = true;
+                if (e.getPointerCount() == 2) {
+                    twoFingerStartX = averageX(e); twoFingerStartY = averageY(e); twoFingerHandled = false;
+                } else twoFingerHandled = true;
+                return true;
+            }
+            if (e.getActionMasked() == MotionEvent.ACTION_POINTER_UP) {
+                // A two-finger swipe pages by the whole screen; a pinch keeps its centroid in place.
+                if (!editMode && !twoFingerHandled && e.getPointerCount() == 2) {
+                    twoFingerHandled = true;
+                    float dx = averageX(e) - twoFingerStartX, dy = averageY(e) - twoFingerStartY;
+                    if (Math.abs(dx) > Math.max(dp(48), v.getWidth() * .12f) && Math.abs(dx) > Math.abs(dy)) {
+                        if (dx < 0) next(true); else previous(true);
+                    }
+                }
                 return true;
             }
             if (e.getActionMasked() == MotionEvent.ACTION_MOVE) {
@@ -290,7 +296,6 @@ public class MainActivity extends Activity {
         LinearLayout tools = new LinearLayout(this); tools.setGravity(Gravity.CENTER_VERTICAL);
         TextView open = button("Öffnen", this::chooseSource);
         detectionButton = button("Auto", this::toggleDetection);
-        TextView options = button("⋯", this::showOptions); options.setContentDescription("Optionen"); options.setTextSize(18);
         editButton = button("Bearbeiten", this::toggleEditMode);
         // Swiping marks systems while editing, so page navigation needs buttons there.
         previousButton = button("‹", this::previous); previousButton.setContentDescription("Vorherige Seite");
@@ -299,7 +304,7 @@ public class MainActivity extends Activity {
         undoEditButton = button("↶", this::undoManualEdit); undoEditButton.setContentDescription("Letzte Bearbeitung rückgängig machen");
         undoButton = button("−", this::undoManualSystem); undoButton.setContentDescription("Ausgewähltes System entfernen");
         clearButton = button("×", this::clearManualSystems); clearButton.setContentDescription("Systeme dieser Seite löschen");
-        addTool(tools, open); addTool(tools, detectionButton); addTool(tools, options); addTool(tools, editButton);
+        addTool(tools, open); addTool(tools, detectionButton); addTool(tools, editButton);
         addTool(tools, previousButton); addTool(tools, nextButton);
         addTool(tools, undoEditButton); addTool(tools, undoButton); addTool(tools, clearButton);
         topOverlay.addView(tools, new LinearLayout.LayoutParams(-2, -2));
@@ -321,7 +326,7 @@ public class MainActivity extends Activity {
     }
 
     private void updateToolButtons() {
-        detectionButton.setText(autoDetection ? "Auto" : "Manuell");
+        detectionButton.setText(autoDetection ? "System" : "Seitenweise");
         setButtonAccent(detectionButton, autoDetection && !editMode);
         editButton.setText(editMode ? "Fertig" : "Bearbeiten");
         setButtonAccent(editButton, editMode);
@@ -412,19 +417,16 @@ public class MainActivity extends Activity {
                 }).show();
     }
 
-    private void showOptions() {
-        String[] labels = {"System einzeln", "Seitenweise", "Alle sichtbaren Systeme"};
-        new AlertDialog.Builder(this)
-                .setTitle("Optionen")
-                .setSingleChoiceItems(labels, pagingMode.ordinal(), (dialog, which) -> {
-                    pagingMode = PagingMode.values()[which];
-                    getPreferences(MODE_PRIVATE).edit().putString("paging_mode", pagingMode.name()).remove("advance_visible_systems").apply();
-                    systemIndex = 0;
-                    renderSystem();
-                    dialog.dismiss();
-                })
-                .setNegativeButton("Schließen", null)
-                .show();
+    private float averageX(MotionEvent e) {
+        float sum = 0f;
+        for (int i = 0; i < e.getPointerCount(); i++) sum += e.getX(i);
+        return sum / e.getPointerCount();
+    }
+
+    private float averageY(MotionEvent e) {
+        float sum = 0f;
+        for (int i = 0; i < e.getPointerCount(); i++) sum += e.getY(i);
+        return sum / e.getPointerCount();
     }
 
     private void pickPdf() {
@@ -723,7 +725,7 @@ public class MainActivity extends Activity {
         autoDetection = !autoDetection;
         updateToolButtons();
         systemIndex = 0;
-        Toast.makeText(this, autoDetection ? "Automatische Notensystem-Erkennung" : "Seitenweise Ansicht", Toast.LENGTH_SHORT).show();
+        Toast.makeText(this, autoDetection ? "Systemweise blättern" : "Seitenweise blättern", Toast.LENGTH_SHORT).show();
         renderSystem();
     }
 
@@ -945,10 +947,13 @@ public class MainActivity extends Activity {
         });
     }
 
-    private void next() {
+    private void next() { next(false); }
+
+    /** Advances by one system, or past all visible systems when {@code wholeScreen} is set. */
+    private void next(boolean wholeScreen) {
         if (renderer == null) return;
-        boolean systemPaging = autoDetection && pagingMode != PagingMode.PAGE;
-        List<SystemRef> shown = currentVisibleSystems();
+        boolean systemPaging = autoDetection;
+        List<SystemRef> shown = wholeScreen ? currentVisibleSystems() : null;
         int nextPage;
         if (shown != null) {
             SystemRef next = adjacentSystem(shown.get(shown.size() - 1), 1, Math.max(scoreView.getWidth(), 1200));
@@ -976,10 +981,12 @@ public class MainActivity extends Activity {
         renderSystem();
     }
 
-    private void previous() {
+    private void previous() { previous(false); }
+
+    private void previous(boolean wholeScreen) {
         if (renderer == null) return;
-        boolean systemPaging = autoDetection && pagingMode != PagingMode.PAGE;
-        List<SystemRef> shown = currentVisibleSystems();
+        boolean systemPaging = autoDetection;
+        List<SystemRef> shown = wholeScreen ? currentVisibleSystems() : null;
         int previousPage;
         if (shown != null) {
             int width = Math.max(scoreView.getWidth(), 1200);
@@ -1124,7 +1131,7 @@ public class MainActivity extends Activity {
         if (scoreView.getWidth() < 1 || scoreView.getHeight() < 1) { scoreView.post(this::renderSystem); return; }
         try {
             int width = Math.max(scoreView.getWidth(), 1200);
-            if (!autoDetection || pagingMode == PagingMode.PAGE) {
+            if (!autoDetection) {
                 visibleSystemCount = 1;
                 visibleSystems = new ArrayList<>();
                 refreshInfo();
@@ -1153,12 +1160,11 @@ public class MainActivity extends Activity {
             int usedHeight = current.height();
             SystemRef previousCursor = current, nextCursor = current;
             boolean canLookBack = true, canLookForward = true;
-            // Visible-system paging anchors the current system at the top so the next
-            // page starts exactly after the last system shown.
-            boolean anchorTop = pagingMode == PagingMode.VISIBLE_SYSTEMS;
+            // The current system is anchored at the top so a whole-screen swipe continues
+            // exactly after the last system shown; earlier systems only fill the end of the score.
             while (true) {
                 boolean added = false;
-                if (canLookBack && (!anchorTop || !canLookForward)) {
+                if (canLookBack && !canLookForward) {
                     SystemRef candidate = adjacentSystem(previousCursor, -1, width);
                     if (candidate == null) canLookBack = false;
                     else if (usedHeight + gapHeight + candidate.height() <= maxCropHeight) {
@@ -1174,7 +1180,7 @@ public class MainActivity extends Activity {
                         usedHeight += gapHeight + candidate.height(); added = true;
                     } else canLookForward = false;
                 }
-                if (!added && !(anchorTop && canLookBack)) break;
+                if (!added && !canLookBack) break;
             }
             ArrayList<SystemRef> visible = new ArrayList<>();
             for (int i = before.size() - 1; i >= 0; i--) visible.add(before.get(i));
@@ -1198,7 +1204,7 @@ public class MainActivity extends Activity {
 
     /** Returns the shown systems if they still belong to the current position, otherwise null. */
     private List<SystemRef> currentVisibleSystems() {
-        if (!autoDetection || pagingMode != PagingMode.VISIBLE_SYSTEMS || visibleSystems.isEmpty()) return null;
+        if (!autoDetection || visibleSystems.isEmpty()) return null;
         for (SystemRef system : visibleSystems)
             if (system.page == pageIndex && system.index == systemIndex) return visibleSystems;
         return null;
@@ -1348,7 +1354,7 @@ public class MainActivity extends Activity {
         String separator = "  ·  ";
         String filePosition = folderPdfIndex >= 0 ? separator + "PDF " + (folderPdfIndex + 1) + "/" + folderPdfs.size() : "";
         String pagePosition = "Seite " + (pageIndex + 1) + "/" + renderer.getPageCount();
-        if (!autoDetection || pagingMode == PagingMode.PAGE) {
+        if (!autoDetection) {
             int markedSystems = manualPageRatios.containsKey(pageIndex) ? manualPageRatios.get(pageIndex).length / 2 : 0;
             String mode = editMode ? "Bearbeiten: " + markedSystems + " Systeme" : "Seitenmodus";
             info.setText(pagePosition + filePosition + separator + mode);
