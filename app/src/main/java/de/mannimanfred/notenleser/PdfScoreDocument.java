@@ -42,6 +42,8 @@ final class PdfScoreDocument implements ScoreDocument {
 
     @Override public float[] systemRatios(int page) { return null; }
 
+    @Override public float[] staffRatios(int page) { return null; }
+
     @Override public void close() {
         renderer.close();
         try { descriptor.close(); } catch (IOException ignored) { }

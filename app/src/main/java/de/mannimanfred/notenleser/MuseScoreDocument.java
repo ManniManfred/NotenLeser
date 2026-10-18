@@ -38,6 +38,8 @@ final class MuseScoreDocument implements ScoreDocument {
 
     @Override public float[] systemRatios(int page) { return engraver.systemRatios(page); }
 
+    @Override public float[] staffRatios(int page) { return engraver.staffRatios(page); }
+
     @Override public void close() { }
 
     /** Draws in staff spaces scaled by k pixels per staff space. */

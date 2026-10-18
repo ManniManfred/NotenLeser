@@ -848,6 +848,22 @@ final class ScoreEngraver {
         }
     }
 
+    /** Top and bottom staff line of every staff on a page as ratios of the page height, as top0, bottom0, ... */
+    float[] staffRatios(int pageIndex) {
+        PageLayout page = pages.get(pageIndex);
+        float[] ratios = new float[page.systems.size() * staffCount * 2];
+        int n = 0;
+        for (int i = 0; i < page.systems.size(); i++) {
+            SystemLayout system = page.systems.get(i);
+            float y = page.y.get(i);
+            for (int s = 0; s < staffCount; s++) {
+                ratios[n++] = (y + system.staffY[s]) / pageHeight;
+                ratios[n++] = (y + system.staffY[s] + 4) / pageHeight;
+            }
+        }
+        return ratios;
+    }
+
     /** System bounds of a page as ratios of the page height, as top0, bottom0, top1, bottom1, ... */
     float[] systemRatios(int pageIndex) {
         PageLayout page = pages.get(pageIndex);

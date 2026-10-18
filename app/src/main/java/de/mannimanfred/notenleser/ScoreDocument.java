@@ -18,5 +18,11 @@ interface ScoreDocument {
      */
     float[] systemRatios(int page);
 
+    /**
+     * Known bounds of every staff (top to bottom staff line) as [top0, bottom0, ...] ratios of the page height,
+     * or null when the staves have to be detected from the rendered image.
+     */
+    float[] staffRatios(int page);
+
     void close();
 }

@@ -66,6 +66,11 @@ public class MainActivity extends Activity {
     private final List<PageSystems> pageSystems = new ArrayList<>();
     private final List<Uri> folderPdfs = new ArrayList<>();
     private final Map<Integer, float[]> manualPageRatios = new HashMap<>();
+    /** Staff bounds per page as ratios of the page height, used to highlight the player's own voice. */
+    private final Map<Integer, float[]> pageStaffRatios = new HashMap<>();
+    /** The player's voice as staff number within a system (1 = top staff), 0 when nothing is highlighted. */
+    private int voice;
+    private static final int MAX_VOICE = 6;
     private final Set<Integer> manualPages = new HashSet<>();
     private final ArrayDeque<ManualSnapshot> manualUndoHistory = new ArrayDeque<>();
     private final ExecutorService sidecarExecutor = Executors.newSingleThreadExecutor();
@@ -110,6 +115,7 @@ public class MainActivity extends Activity {
         super.onCreate(state);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         immersive();
+        voice = getPreferences(MODE_PRIVATE).getInt("voice", 0);
         buildUi();
         String savedFolder = getPreferences(MODE_PRIVATE).getString("folder_tree", null);
         if (savedFolder != null) {
@@ -273,6 +279,10 @@ public class MainActivity extends Activity {
         openFolder.setTextSize(16); openFolder.setBackground(startActionBackground(false));
         LinearLayout.LayoutParams folderParams = new LinearLayout.LayoutParams(dp(260), dp(54));
         folderParams.topMargin = dp(12); startPage.addView(openFolder, folderParams);
+        TextView startSettings = button("Einstellungen", this::showSettings);
+        startSettings.setTextSize(15); startSettings.setTextColor(Color.rgb(221, 190, 116)); startSettings.setBackground(null);
+        LinearLayout.LayoutParams settingsParams = new LinearLayout.LayoutParams(dp(260), dp(48));
+        settingsParams.topMargin = dp(8); startPage.addView(startSettings, settingsParams);
         TextView gestures = new TextView(this);
         gestures.setText("Wischen ← →  blättert   ·   Wischen ↑ ↓  wechselt die PDF");
         gestures.setTextSize(13); gestures.setTextColor(Color.rgb(128, 137, 147)); gestures.setGravity(Gravity.CENTER);
@@ -304,7 +314,9 @@ public class MainActivity extends Activity {
         undoEditButton = button("↶", this::undoManualEdit); undoEditButton.setContentDescription("Letzte Bearbeitung rückgängig machen");
         undoButton = button("−", this::undoManualSystem); undoButton.setContentDescription("Ausgewähltes System entfernen");
         clearButton = button("×", this::clearManualSystems); clearButton.setContentDescription("Systeme dieser Seite löschen");
-        addTool(tools, open); addTool(tools, detectionButton); addTool(tools, editButton);
+        TextView settings = button("⚙", this::showSettings); settings.setContentDescription("Einstellungen");
+        settings.setTextSize(18);
+        addTool(tools, open); addTool(tools, detectionButton); addTool(tools, editButton); addTool(tools, settings);
         addTool(tools, previousButton); addTool(tools, nextButton);
         addTool(tools, undoEditButton); addTool(tools, undoButton); addTool(tools, clearButton);
         topOverlay.addView(tools, new LinearLayout.LayoutParams(-2, -2));
@@ -415,6 +427,50 @@ public class MainActivity extends Activity {
                 .setItems(new String[]{"Einzelne Datei auswählen (PDF, MuseScore)", "Ordner mit Noten auswählen"}, (dialog, which) -> {
                     if (which == 0) pickPdf(); else pickFolder();
                 }).show();
+    }
+
+    private void showSettings() {
+        LinearLayout content = new LinearLayout(this); content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(dp(24), dp(8), dp(24), 0);
+        TextView heading = new TextView(this); heading.setText("Meine Stimme"); heading.setTextSize(16);
+        heading.setTextColor(Color.rgb(33, 33, 33));
+        heading.setTypeface(android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL));
+        content.addView(heading);
+        TextView hint = new TextView(this); hint.setTextSize(13); hint.setTextColor(Color.rgb(110, 110, 110));
+        hint.setText("Die gewählte Notenzeile wird in jedem System mit mehreren Stimmen farbig hinterlegt.");
+        hint.setPadding(0, dp(2), 0, dp(6));
+        content.addView(hint);
+        android.widget.RadioGroup choices = new android.widget.RadioGroup(this);
+        for (int i = 0; i <= MAX_VOICE; i++) {
+            android.widget.RadioButton choice = new android.widget.RadioButton(this);
+            choice.setId(View.generateViewId()); choice.setTag(i); choice.setTextSize(15);
+            choice.setText(i == 0 ? "Keine hervorheben" : voiceName(i));
+            choices.addView(choice);
+            if (i == voice) choices.check(choice.getId());
+        }
+        android.widget.ScrollView scroll = new android.widget.ScrollView(this);
+        content.addView(choices);
+        scroll.addView(content);
+        new AlertDialog.Builder(this)
+                .setTitle("Einstellungen")
+                .setView(scroll)
+                .setNegativeButton("Abbrechen", null)
+                .setPositiveButton("Übernehmen", (dialog, which) -> {
+                    View checked = choices.findViewById(choices.getCheckedRadioButtonId());
+                    setVoice(checked == null ? 0 : (Integer) checked.getTag());
+                }).show();
+    }
+
+    private static String voiceName(int voice) { return voice + ". Stimme"; }
+
+    private void setVoice(int newVoice) {
+        if (newVoice == voice) return;
+        voice = newVoice;
+        getPreferences(MODE_PRIVATE).edit().putInt("voice", voice).apply();
+        if (renderer != null) {
+            renderSystem();
+            showBanner(voice == 0 ? "Keine Stimme hervorgehoben" : voiceName(voice) + " wird hervorgehoben", false);
+        }
     }
 
     private float averageX(MotionEvent e) {
@@ -667,7 +723,7 @@ public class MainActivity extends Activity {
                 renderer = loadedRenderer;
                 displayName = loadedName;
                 pdfUri = uri; pageIndex = startAtLastPage ? loadedRenderer.getPageCount() - 1 : 0; systemIndex = 0;
-                pageSystems.clear();
+                pageSystems.clear(); pageStaffRatios.clear();
                 for (int i = 0; i < renderer.getPageCount(); i++) pageSystems.add(null);
                 manualPageRatios.clear(); manualPageRatios.putAll(loadedSidecar);
                 manualPages.clear(); manualPages.addAll(loadedSidecar.keySet());
@@ -1042,10 +1098,67 @@ public class MainActivity extends Activity {
             return systems;
         }
         Bitmap bitmap = renderPageBitmap(pageIndex, width);
-        systems = detectSystems(bitmap);
+        systems = detectSystems(bitmap, pageIndex);
         bitmap.recycle();
         pageSystems.set(pageIndex, systems);
         return systems;
+    }
+
+    /** Staff bounds of a page as ratios of the page height; PDF pages are detected once and cached. */
+    private float[] getPageStaves(int page, int width) {
+        float[] staves = pageStaffRatios.get(page);
+        if (staves != null) return staves;
+        staves = renderer.staffRatios(page);
+        if (staves == null) {
+            // Manually marked pages skip detection for their systems, so their staves are found here.
+            Bitmap bitmap = renderPageBitmap(page, width);
+            detectSystems(bitmap, page);
+            bitmap.recycle();
+            staves = pageStaffRatios.get(page);
+        }
+        if (staves == null) staves = new float[0];
+        pageStaffRatios.put(page, staves);
+        return staves;
+    }
+
+    /** Page pixel bounds {top, bottom} of the player's staff within a system, or null if nothing is highlighted. */
+    private int[] voiceStaff(int page, int systemTop, int systemBottom, int width) {
+        if (voice <= 0) return null;
+        float[] staves = getPageStaves(page, width);
+        int pageHeight = pageBitmapHeight(page, width);
+        ArrayList<int[]> inSystem = new ArrayList<>();
+        for (int i = 0; i + 1 < staves.length; i += 2) {
+            int top = Math.round(staves[i] * pageHeight), bottom = Math.round(staves[i + 1] * pageHeight);
+            int center = (top + bottom) / 2;
+            if (center >= systemTop && center < systemBottom) inSystem.add(new int[]{top, bottom});
+        }
+        // A single staff is already the player's own part; highlighting it would add nothing.
+        if (inSystem.size() < 2 || voice > inSystem.size()) return null;
+        return inSystem.get(voice - 1);
+    }
+
+    /** Tints the player's staff; multiplying keeps the notes black while the paper turns amber. */
+    private void drawVoiceHighlight(Canvas canvas, int[] staff, float offsetY, int width, float clipTop, float clipBottom) {
+        float staffHeight = staff[1] - staff[0];
+        float pad = staffHeight * .55f;
+        float top = Math.max(clipTop, staff[0] - pad + offsetY), bottom = Math.min(clipBottom, staff[1] + pad + offsetY);
+        if (bottom <= top) return;
+        Paint tint = new Paint(Paint.ANTI_ALIAS_FLAG); tint.setColor(Color.rgb(255, 232, 170));
+        tint.setXfermode(new android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.MULTIPLY));
+        canvas.drawRect(0, top, width, bottom, tint);
+        Paint bar = new Paint(Paint.ANTI_ALIAS_FLAG); bar.setColor(ACCENT);
+        canvas.drawRect(0, top, Math.max(4f, width / 160f), bottom, bar);
+    }
+
+    private void drawPageVoiceHighlight(Bitmap bitmap, int page) {
+        if (voice <= 0) return;
+        int width = bitmap.getWidth();
+        PageSystems systems = getPageSystems(page, width);
+        Canvas canvas = new Canvas(bitmap);
+        for (int i = 0; i < systems.count(); i++) {
+            int[] staff = voiceStaff(page, systems.top[i], systems.bottom[i], width);
+            if (staff != null) drawVoiceHighlight(canvas, staff, 0, width, systems.top[i], systems.bottom[i]);
+        }
     }
 
     private int pageBitmapHeight(int pageIndex, int width) {
@@ -1137,6 +1250,7 @@ public class MainActivity extends Activity {
                 refreshInfo();
                 Bitmap page = renderPageBitmap(pageIndex, width);
                 if (editMode) drawManualOverlay(page, pageIndex);
+                else drawPageVoiceHighlight(page, pageIndex);
                 scoreView.setImageBitmap(page);
                 applyImageTransform();
                 return;
@@ -1281,6 +1395,8 @@ public class MainActivity extends Activity {
                 Rect source = new Rect(0, system.top, width, system.bottom);
                 Rect destination = new Rect(0, y, width, y + systemHeight);
                 canvas.drawBitmap(pageBitmap, source, destination, imagePaint);
+                int[] staff = voiceStaff(system.page, system.top, system.bottom, width);
+                if (staff != null) drawVoiceHighlight(canvas, staff, y - system.top, width, y, y + systemHeight);
                 String label = (system.page + 1) + "·" + (system.index + 1);
                 float badgeHeight = dp(17) / displayScale;
                 float badgeWidth = Math.max(dp(27) / displayScale, labelPaint.measureText(label) + dp(8) / displayScale);
@@ -1317,11 +1433,16 @@ public class MainActivity extends Activity {
         return systems == null || systems.count() == 0 ? systemsPerPage : systems.count();
     }
 
-    private PageSystems detectSystems(Bitmap image) {
+    private PageSystems detectSystems(Bitmap image, int page) {
         int width = image.getWidth(), height = image.getHeight();
         int[] pixels = new int[width * height];
         image.getPixels(pixels, 0, width, 0, 0, width, height);
         SystemDetector.Result result = SystemDetector.detect(pixels, width, height);
+        float[] staves = new float[result.staffTop.length * 2];
+        for (int i = 0; i < result.staffTop.length; i++) {
+            staves[i * 2] = result.staffTop[i] / (float) height; staves[i * 2 + 1] = result.staffBottom[i] / (float) height;
+        }
+        pageStaffRatios.put(page, staves);
         return new PageSystems(result.top, result.bottom);
     }
 

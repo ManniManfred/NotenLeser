@@ -18,7 +18,12 @@ final class SystemDetector {
 
     static final class Result {
         final int[] top, bottom, staffCount;
-        Result(int[] top, int[] bottom, int[] staffCount) { this.top = top; this.bottom = bottom; this.staffCount = staffCount; }
+        /** Top and bottom staff line of every found staff from top to bottom of the page. */
+        final int[] staffTop, staffBottom;
+        Result(int[] top, int[] bottom, int[] staffCount, int[] staffTop, int[] staffBottom) {
+            this.top = top; this.bottom = bottom; this.staffCount = staffCount;
+            this.staffTop = staffTop; this.staffBottom = staffBottom;
+        }
     }
 
     /** A staff follows its strip detections piecewise linearly, so slightly curved scans are tracked too. */
@@ -92,7 +97,7 @@ final class SystemDetector {
         return systemExtents(staffs, groups, spacing);
     }
 
-    private static Result empty() { return new Result(new int[0], new int[0], new int[0]); }
+    private static Result empty() { return new Result(new int[0], new int[0], new int[0], new int[0], new int[0]); }
 
     /** Most common distance between neighbouring thin horizontal strokes, i.e. the staff line spacing. */
     private float estimateSpacing() {
@@ -407,7 +412,9 @@ final class SystemDetector {
             }
             bottom[i] = Math.min(dividers[i + 1], lastInk + margin);
         }
-        return new Result(top, bottom, staffCount);
+        int[] lineTop = new int[staffs.size()], lineBottom = new int[staffs.size()];
+        for (int i = 0; i < staffs.size(); i++) { lineTop[i] = staffs.get(i).minTop(); lineBottom[i] = staffs.get(i).maxBottom(); }
+        return new Result(top, bottom, staffCount, lineTop, lineBottom);
     }
 
     private static int blankDivider(int[] ink, int from, int to, int noise) {
