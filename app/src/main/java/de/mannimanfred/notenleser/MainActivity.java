@@ -1204,116 +1204,12 @@ public class MainActivity extends Activity {
         return systems == null || systems.count() == 0 ? systemsPerPage : systems.count();
     }
 
-    /** Finds five-line staves while compensating for slight scan skew, then combines voices. */
     private PageSystems detectSystems(Bitmap image) {
         int width = image.getWidth(), height = image.getHeight();
-        int left = width / 20, right = width * 19 / 20;
-        int sampleStep = Math.max(2, (right - left + 399) / 400);
-        int sampleColumns = (right - left + sampleStep - 1) / sampleStep;
         int[] pixels = new int[width * height];
         image.getPixels(pixels, 0, width, 0, 0, width, height);
-        int darkCount = 0;
-        for (int x = left; x < right; x += sampleStep) {
-            for (int y = 0, offset = x; y < height; y++, offset += width) {
-                int color = pixels[offset];
-                int luminance = (Color.red(color) * 299 + Color.green(color) * 587 + Color.blue(color) * 114) / 1000;
-                if (luminance < 160) darkCount++;
-            }
-        }
-        int[] darkX = new int[darkCount], darkY = new int[darkCount];
-        int point = 0;
-        for (int x = left; x < right; x += sampleStep) {
-            for (int y = 0, offset = x; y < height; y++, offset += width) {
-                int color = pixels[offset];
-                int luminance = (Color.red(color) * 299 + Color.green(color) * 587 + Color.blue(color) * 114) / 1000;
-                if (luminance < 160) { darkX[point] = x; darkY[point] = y; point++; }
-            }
-        }
-        ArrayList<Staff> staffs = new ArrayList<>();
-        float bestSlope = 0;
-        for (int step = -12; step <= 12; step++) {
-            float slope = step * .003f;
-            ArrayList<Staff> candidate = detectStaffsAtSlope(darkX, darkY, width, height, sampleColumns, slope);
-            if (candidate.size() > staffs.size()) { staffs = candidate; bestSlope = slope; }
-        }
-        float coarseBestSlope = bestSlope;
-        for (int step = -6; step <= 6; step++) {
-            float slope = coarseBestSlope + step * .0005f;
-            ArrayList<Staff> candidate = detectStaffsAtSlope(darkX, darkY, width, height, sampleColumns, slope);
-            if (candidate.size() > staffs.size()) staffs = candidate;
-        }
-        if (staffs.isEmpty()) return new PageSystems(new int[0], new int[0]);
-        ArrayList<Float> gapRatios = new ArrayList<>();
-        for (int i = 1; i < staffs.size(); i++) {
-            Staff previous = staffs.get(i - 1), next = staffs.get(i);
-            gapRatios.add((next.top - previous.bottom) / (float) Math.max(previous.spacing, next.spacing));
-        }
-        float systemGap = 6.0f;
-        if (gapRatios.size() >= 2) {
-            Collections.sort(gapRatios);
-            float typicalGap = gapRatios.get((gapRatios.size() - 1) / 2);
-            systemGap = Math.max(6.0f, typicalGap * 1.6f);
-        }
-        ArrayList<Integer> tops = new ArrayList<>(), bottoms = new ArrayList<>();
-        Staff first = staffs.get(0), last = first;
-        for (int i = 1; i < staffs.size(); i++) {
-            Staff next = staffs.get(i);
-            if (next.top - last.bottom <= Math.max(last.spacing, next.spacing) * systemGap) {
-                last = next;
-            } else {
-                tops.add(Math.max(0, first.top - first.spacing * 3));
-                bottoms.add(Math.min(height, last.bottom + last.spacing * 3));
-                first = last = next;
-            }
-        }
-        tops.add(Math.max(0, first.top - first.spacing * 3));
-        bottoms.add(Math.min(height, last.bottom + last.spacing * 3));
-        int[] top = new int[tops.size()], bottom = new int[bottoms.size()];
-        for (int i = 0; i < top.length; i++) { top[i] = tops.get(i); bottom[i] = bottoms.get(i); }
-        return new PageSystems(top, bottom);
-    }
-
-    private ArrayList<Staff> detectStaffsAtSlope(int[] darkX, int[] darkY, int width, int height,
-                                                 int sampleColumns, float slope) {
-        int[] votes = new int[height];
-        float centerX = width / 2f;
-        for (int i = 0; i < darkX.length; i++) {
-            int row = Math.round(darkY[i] - slope * (darkX[i] - centerX));
-            if (row >= 0 && row < height) votes[row]++;
-        }
-        ArrayList<Integer> lines = new ArrayList<>();
-        int rowStart = -1, lastHit = -1;
-        float threshold = sampleColumns * .55f;
-        for (int y = 0; y < height; y++) {
-            int nearbyVotes = votes[y] + (y > 0 ? votes[y - 1] : 0) + (y + 1 < height ? votes[y + 1] : 0);
-            if (nearbyVotes >= threshold) {
-                if (rowStart < 0) rowStart = y;
-                else if (y > lastHit + 2) {
-                    lines.add((rowStart + lastHit) / 2);
-                    rowStart = y;
-                }
-                lastHit = y;
-            }
-        }
-        if (rowStart >= 0) lines.add((rowStart + lastHit) / 2);
-
-        ArrayList<Staff> staffs = new ArrayList<>();
-        int maxSpacing = Math.max(8, height / 30);
-        for (int i = 0; i + 4 < lines.size();) {
-            int a = lines.get(i), b = lines.get(i + 1), c = lines.get(i + 2), d = lines.get(i + 3), e = lines.get(i + 4);
-            int spacing = (e - a) / 4;
-            boolean regular = spacing >= 3 && spacing <= maxSpacing &&
-                    Math.abs((b - a) - spacing) <= spacing * .35f && Math.abs((c - b) - spacing) <= spacing * .35f &&
-                    Math.abs((d - c) - spacing) <= spacing * .35f && Math.abs((e - d) - spacing) <= spacing * .35f;
-            if (regular) { staffs.add(new Staff(a, e, spacing)); i += 5; }
-            else i++;
-        }
-        return staffs;
-    }
-
-    private static class Staff {
-        final int top, bottom, spacing;
-        Staff(int top, int bottom, int spacing) { this.top = top; this.bottom = bottom; this.spacing = spacing; }
+        SystemDetector.Result result = SystemDetector.detect(pixels, width, height);
+        return new PageSystems(result.top, result.bottom);
     }
 
     private static class PageSystems {
