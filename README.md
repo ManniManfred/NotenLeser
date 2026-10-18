@@ -6,10 +6,12 @@ Native Android-App zum Lesen von PDF-Noten im Vollbild. Das PDF wird über den A
 
 - PDF-Seiten werden mit Androids PDF-Renderer dargestellt.
 - Vollbild ohne Systemleisten; Display bleibt während des Lesens an.
-- Abgerundete, halbtransparente Bedienelemente liegen über der Notenseite und blenden sich nach 3,5 Sekunden ohne Eingabe aus. Tippen auf die Seite blendet sie wieder ein.
+- Abgerundete, dunkle Bedienelemente mit Titel und Statuszeile liegen über der Notenseite und blenden sich nach 3,5 Sekunden ohne Eingabe aus. Tippen auf die Seite blendet sie wieder ein.
 - Der PDF-Titel wird aus den Dateimetadaten des Dateianbieters gelesen; die Nextcloud-interne URI erscheint nicht als Dateiname.
 - Tippen auf „PDF öffnen“, um eine Notendatei auszuwählen.
-- Wischen nach links/rechts oder die Tasten „Weiter“/„Zurück“ wechseln das System. Am Seitenende springt die App auf die nächste PDF-Seite.
+- Wischen nach links/rechts wechselt das System. Am Seitenende springt die App auf die nächste PDF-Seite.
+- Wischen nach oben/unten wechselt zur nächsten bzw. vorherigen PDF im geöffneten Ordner; ein kurzes Hinweisfeld zeigt Titel und Position.
+- Im Bearbeitungsmodus (Wischen markiert dort Systeme) blättern die Tasten ‹/› seitenweise.
 - Die App erkennt Notenzeilen (fünf waagerechte Linien), fasst sie zu Systemen zusammen und navigiert zwischen erkannten Systemen.
 - Wenn der Bildschirm Platz bietet, werden mehrere aufeinanderfolgende Systeme gleichzeitig angezeigt, auch über Seitengrenzen hinweg. Navigation verschiebt den sichtbaren Ausschnitt jeweils um ein System.
 - Angezeigte Systeme sind mit Seiten- und Systemnummer im Format „Seite·System“ markiert und durch dezente Linien getrennt. Die Statuszeile zeigt aktuelle und gesamte Seitenzahl.

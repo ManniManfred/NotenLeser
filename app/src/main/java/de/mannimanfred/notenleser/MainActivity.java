@@ -79,11 +79,17 @@ public class MainActivity extends Activity {
     private Uri folderTreeUri;
     private final Handler uiHandler = new Handler();
     private final Runnable hideControlsTask = this::hideControls;
+    private final Runnable hideBannerTask = this::hideBanner;
     private ImageView scoreView;
     private TextView info;
     private TextView detectionButton;
     private TextView editButton;
     private TextView previousButton;
+    private TextView nextButton;
+    private TextView undoEditButton;
+    private TextView titleView;
+    private TextView banner;
+    private int pdfSwitchDirection;
     private TextView undoButton;
     private TextView clearButton;
     private LinearLayout topOverlay;
@@ -135,17 +141,26 @@ public class MainActivity extends Activity {
                 View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
     }
 
+    private static final int ACCENT = Color.rgb(196, 152, 72);
+
     private TextView button(String label, Runnable action) {
         TextView b = new TextView(this);
         b.setText(label); b.setTextSize(14); b.setTextColor(Color.WHITE);
         b.setGravity(Gravity.CENTER); b.setSingleLine(true);
-        b.setPadding(dp(12), dp(10), dp(12), dp(10)); b.setMinHeight(dp(44));
-        GradientDrawable shape = new GradientDrawable();
-        shape.setColor(Color.argb(96, 54, 61, 72)); shape.setCornerRadius(dp(18));
-        shape.setStroke(dp(1), Color.argb(70, 255, 255, 255));
-        b.setBackground(shape); b.setElevation(dp(3));
+        b.setTypeface(android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL));
+        b.setPadding(dp(14), dp(8), dp(14), dp(8)); b.setMinHeight(dp(40)); b.setMinWidth(dp(44));
+        setButtonAccent(b, false);
         b.setOnClickListener(v -> { showControls(); action.run(); });
         return b;
+    }
+
+    private void setButtonAccent(TextView b, boolean accent) {
+        GradientDrawable shape = new GradientDrawable();
+        shape.setColor(accent ? ACCENT : Color.argb(255, 52, 59, 69)); shape.setCornerRadius(dp(20));
+        if (!accent) shape.setStroke(dp(1), Color.argb(40, 255, 255, 255));
+        b.setTextColor(accent ? Color.rgb(28, 22, 12) : Color.WHITE);
+        b.setBackground(new android.graphics.drawable.RippleDrawable(
+                android.content.res.ColorStateList.valueOf(Color.argb(70, 255, 255, 255)), shape, null));
     }
 
     private void buildUi() {
@@ -211,8 +226,11 @@ public class MainActivity extends Activity {
                     } else editOrAddManualSystem(touchY, e.getY());
                     return true;
                 }
+                if (multiTouchGesture) return true;
                 if (Math.abs(dx) > Math.max(dp(48), v.getWidth() * .12f) && Math.abs(dx) > Math.abs(dy)) {
-                    showControls(); if (dx < 0) next(); else previous();
+                    if (dx < 0) next(); else previous();
+                } else if (Math.abs(dy) > Math.max(dp(64), v.getHeight() * .15f) && Math.abs(dy) > Math.abs(dx) * 1.3f) {
+                    switchPdf(dy < 0 ? 1 : -1);
                 } else if (Math.abs(dx) < dp(16) && Math.abs(dy) < dp(16)) toggleControls();
                 return true;
             }
@@ -253,36 +271,101 @@ public class MainActivity extends Activity {
         openFolder.setTextSize(16); openFolder.setBackground(startActionBackground(false));
         LinearLayout.LayoutParams folderParams = new LinearLayout.LayoutParams(dp(260), dp(54));
         folderParams.topMargin = dp(12); startPage.addView(openFolder, folderParams);
+        TextView gestures = new TextView(this);
+        gestures.setText("Wischen ← →  blättert   ·   Wischen ↑ ↓  wechselt die PDF");
+        gestures.setTextSize(13); gestures.setTextColor(Color.rgb(128, 137, 147)); gestures.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams gestureParams = new LinearLayout.LayoutParams(-2, -2);
+        gestureParams.topMargin = dp(32); startPage.addView(gestures, gestureParams);
         FrameLayout.LayoutParams startParams = new FrameLayout.LayoutParams(-1, -1);
         root.addView(startPage, startParams);
 
         topOverlay = new LinearLayout(this); topOverlay.setOrientation(LinearLayout.VERTICAL);
-        topOverlay.setPadding(dp(12), dp(8), dp(12), dp(8)); topOverlay.setBackground(panelBackground());
-        info = new TextView(this); info.setTextColor(Color.WHITE); info.setTextSize(14);
-        info.setMaxLines(2); info.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        info.setMaxWidth(dp(330));
-        info.setGravity(Gravity.CENTER_VERTICAL); info.setPadding(dp(4), dp(2), dp(4), dp(6));
+        topOverlay.setPadding(dp(14), dp(12), dp(14), dp(12)); topOverlay.setBackground(panelBackground());
+        topOverlay.setElevation(dp(6));
+        titleView = new TextView(this); titleView.setTextColor(Color.WHITE); titleView.setTextSize(16);
+        titleView.setTypeface(android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL));
+        titleView.setSingleLine(true); titleView.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        titleView.setMaxWidth(dp(420)); titleView.setPadding(dp(4), 0, dp(4), 0);
+        topOverlay.addView(titleView, new LinearLayout.LayoutParams(-2, -2));
+        info = new TextView(this); info.setTextColor(Color.rgb(170, 178, 188)); info.setTextSize(12);
+        info.setSingleLine(true); info.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        info.setMaxWidth(dp(420)); info.setPadding(dp(4), dp(2), dp(4), dp(10));
         topOverlay.addView(info, new LinearLayout.LayoutParams(-2, -2));
         LinearLayout tools = new LinearLayout(this); tools.setGravity(Gravity.CENTER_VERTICAL);
         TextView open = button("Öffnen", this::chooseSource);
-        detectionButton = button("Auto an", this::toggleDetection);
-        previousButton = button("‹", this::previous); previousButton.setContentDescription("Zurück");
-        TextView next = button("›", this::next); next.setContentDescription("Weiter");
-        TextView options = button("⋯", this::showOptions); options.setContentDescription("Optionen");
-        editButton = button("Bearb.", this::toggleEditMode);
-        undoButton = button("↶", this::undoManualSystem); undoButton.setContentDescription("Ausgewähltes System entfernen");
+        detectionButton = button("Auto", this::toggleDetection);
+        TextView options = button("⋯", this::showOptions); options.setContentDescription("Optionen"); options.setTextSize(18);
+        editButton = button("Bearbeiten", this::toggleEditMode);
+        // Swiping marks systems while editing, so page navigation needs buttons there.
+        previousButton = button("‹", this::previous); previousButton.setContentDescription("Vorherige Seite");
+        nextButton = button("›", this::next); nextButton.setContentDescription("Nächste Seite");
+        previousButton.setTextSize(20); nextButton.setTextSize(20);
+        undoEditButton = button("↶", this::undoManualEdit); undoEditButton.setContentDescription("Letzte Bearbeitung rückgängig machen");
+        undoButton = button("−", this::undoManualSystem); undoButton.setContentDescription("Ausgewähltes System entfernen");
         clearButton = button("×", this::clearManualSystems); clearButton.setContentDescription("Systeme dieser Seite löschen");
-        undoButton.setVisibility(View.GONE); clearButton.setVisibility(View.GONE);
-        previousButton.setTextSize(22); next.setTextSize(22);
-        previousButton.setPadding(dp(4), dp(10), dp(4), dp(10)); next.setPadding(dp(4), dp(10), dp(4), dp(10));
-        addTool(tools, open); addTool(tools, previousButton); addTool(tools, detectionButton); addTool(tools, next); addTool(tools, options);
-        addTool(tools, editButton); addTool(tools, undoButton); addTool(tools, clearButton);
+        addTool(tools, open); addTool(tools, detectionButton); addTool(tools, options); addTool(tools, editButton);
+        addTool(tools, previousButton); addTool(tools, nextButton);
+        addTool(tools, undoEditButton); addTool(tools, undoButton); addTool(tools, clearButton);
         topOverlay.addView(tools, new LinearLayout.LayoutParams(-2, -2));
         FrameLayout.LayoutParams topParams = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.LEFT);
-        topParams.setMargins(dp(10), dp(12), 0, 0);
+        topParams.setMargins(dp(12), dp(12), dp(12), 0);
         root.addView(topOverlay, topParams);
 
+        banner = new TextView(this); banner.setTextColor(Color.WHITE); banner.setTextSize(15);
+        banner.setGravity(Gravity.CENTER); banner.setMaxLines(2); banner.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        banner.setTypeface(android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL));
+        banner.setPadding(dp(20), dp(12), dp(20), dp(12)); banner.setMaxWidth(dp(420));
+        banner.setBackground(panelBackground()); banner.setElevation(dp(6));
+        banner.setAlpha(0f); banner.setVisibility(View.GONE);
+        FrameLayout.LayoutParams bannerParams = new FrameLayout.LayoutParams(-2, -2, Gravity.CENTER);
+        root.addView(banner, bannerParams);
+
+        updateToolButtons();
         setContentView(root); refreshInfo(); showControls();
+    }
+
+    private void updateToolButtons() {
+        detectionButton.setText(autoDetection ? "Auto" : "Manuell");
+        setButtonAccent(detectionButton, autoDetection && !editMode);
+        editButton.setText(editMode ? "Fertig" : "Bearbeiten");
+        setButtonAccent(editButton, editMode);
+        int editVisibility = editMode ? View.VISIBLE : View.GONE;
+        previousButton.setVisibility(editVisibility); nextButton.setVisibility(editVisibility);
+        undoEditButton.setVisibility(editVisibility); undoButton.setVisibility(editVisibility);
+        clearButton.setVisibility(editVisibility);
+    }
+
+    private void showBanner(String text, boolean persistent) {
+        if (banner == null) return;
+        uiHandler.removeCallbacks(hideBannerTask);
+        banner.setText(text);
+        banner.animate().cancel();
+        if (banner.getVisibility() != View.VISIBLE) { banner.setVisibility(View.VISIBLE); banner.setAlpha(0f); }
+        banner.animate().alpha(1f).setDuration(150);
+        if (!persistent) uiHandler.postDelayed(hideBannerTask, 1400);
+    }
+
+    private void hideBanner() {
+        if (banner == null) return;
+        banner.animate().alpha(0f).setDuration(300).withEndAction(() -> banner.setVisibility(View.GONE));
+    }
+
+    /** Opens the next (direction 1) or previous (direction -1) PDF of the chosen folder. */
+    private void switchPdf(int direction) {
+        if (folderPdfIndex < 0 || folderPdfs.isEmpty()) {
+            showBanner("Zum PDF-Wechsel einen Ordner öffnen", false);
+            return;
+        }
+        int target = folderPdfIndex + direction;
+        if (target < 0 || target >= folderPdfs.size()) {
+            showBanner(direction > 0 ? "Letzte PDF im Ordner" : "Erste PDF im Ordner", false);
+            return;
+        }
+        folderPdfIndex = target;
+        pdfSwitchDirection = direction;
+        scoreView.animate().cancel();
+        scoreView.animate().translationY(-direction * scoreView.getHeight() * .08f).alpha(0f).setDuration(180);
+        openPdf(folderPdfs.get(folderPdfIndex));
     }
 
     private GradientDrawable startActionBackground(boolean primary) {
@@ -300,8 +383,8 @@ public class MainActivity extends Activity {
 
     private GradientDrawable panelBackground() {
         GradientDrawable bg = new GradientDrawable();
-        bg.setColor(Color.argb(78, 24, 28, 34)); bg.setCornerRadius(dp(22));
-        bg.setStroke(dp(1), Color.argb(45, 255, 255, 255)); return bg;
+        bg.setColor(Color.argb(228, 24, 28, 34)); bg.setCornerRadius(dp(22));
+        bg.setStroke(dp(1), Color.argb(36, 255, 255, 255)); return bg;
     }
 
     private int dp(float value) { return Math.round(value * getResources().getDisplayMetrics().density); }
@@ -382,8 +465,7 @@ public class MainActivity extends Activity {
             Uri u = data.getData();
             folderTreeUri = null;
             editMode = false; autoDetection = true;
-            detectionButton.setText("Auto an"); editButton.setText("Bearb.");
-            undoButton.setVisibility(View.GONE); clearButton.setVisibility(View.GONE);
+            updateToolButtons();
             try { getContentResolver().takePersistableUriPermission(u, Intent.FLAG_GRANT_READ_URI_PERMISSION); } catch (Exception ignored) { }
             folderPdfs.clear(); folderPdfIndex = -1;
             getPreferences(MODE_PRIVATE).edit().remove("folder_tree").apply();
@@ -523,7 +605,8 @@ public class MainActivity extends Activity {
         final int requestId = ++openRequestId;
         final Uri sidecarTree = folderTreeUri;
         closePdf();
-        Toast.makeText(this, "PDF wird geladen …", Toast.LENGTH_SHORT).show();
+        showBanner(folderPdfIndex >= 0 ? "PDF " + (folderPdfIndex + 1) + " / " + folderPdfs.size() + " wird geladen …"
+                : "PDF wird geladen …", true);
         new Thread(() -> loadPdf(uri, requestId, startAtLastPage, sidecarTree), "notenleser-pdf-loader").start();
     }
 
@@ -571,6 +654,8 @@ public class MainActivity extends Activity {
                 getPreferences(MODE_PRIVATE).edit().putString("pdf", uri.toString()).apply();
                 showControls();
                 renderSystem();
+                showBanner(folderPdfIndex >= 0 ? loadedName + "\nPDF " + (folderPdfIndex + 1) + " / " + folderPdfs.size() : loadedName, false);
+                revealScore();
             });
         } catch (Exception e) {
             if (localRenderer != null) localRenderer.close();
@@ -578,10 +663,19 @@ public class MainActivity extends Activity {
             if (localCopy != null) localCopy.delete();
             final String details = describeCause(e);
             runOnUiThread(() -> {
-                if (requestId == openRequestId && !isFinishing() && !isDestroyed())
+                if (requestId == openRequestId && !isFinishing() && !isDestroyed()) {
+                    hideBanner(); revealScore();
                     Toast.makeText(this, "PDF-Lesefehler: " + details, Toast.LENGTH_LONG).show();
+                }
             });
         }
+    }
+
+    private void revealScore() {
+        scoreView.animate().cancel();
+        if (pdfSwitchDirection != 0) scoreView.setTranslationY(pdfSwitchDirection * scoreView.getHeight() * .08f);
+        pdfSwitchDirection = 0;
+        scoreView.animate().translationY(0f).alpha(1f).setDuration(220);
     }
 
     private String queryDisplayName(Uri uri) {
@@ -605,11 +699,11 @@ public class MainActivity extends Activity {
 
     private void toggleDetection() {
         if (editMode) {
-            Toast.makeText(this, "Zum Beenden erst Bearb. antippen", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "Zum Beenden erst „Fertig“ antippen", Toast.LENGTH_SHORT).show();
             return;
         }
         autoDetection = !autoDetection;
-        detectionButton.setText(autoDetection ? "Auto an" : "Auto aus");
+        updateToolButtons();
         systemIndex = 0;
         Toast.makeText(this, autoDetection ? "Automatische Notensystem-Erkennung" : "Seitenweise Ansicht", Toast.LENGTH_SHORT).show();
         renderSystem();
@@ -627,11 +721,7 @@ public class MainActivity extends Activity {
         editMode = !editMode;
         autoDetection = !editMode;
         zoom = 1f; panX = 0f; panY = 0f;
-        detectionButton.setText(autoDetection ? "Auto an" : "Auto aus");
-        editButton.setText(editMode ? "Fertig" : "Bearb.");
-        previousButton.setContentDescription(editMode ? "Letzte Bearbeitung rückgängig machen" : "Zurück zum vorherigen System");
-        undoButton.setVisibility(editMode ? View.VISIBLE : View.GONE);
-        clearButton.setVisibility(editMode ? View.VISIBLE : View.GONE);
+        updateToolButtons();
         systemIndex = 0;
         if (editMode) {
             ensureManualPage(pageIndex, Math.max(scoreView.getWidth(), 1200));
@@ -838,7 +928,7 @@ public class MainActivity extends Activity {
     }
 
     private void next() {
-        if (renderer == null) { pickPdf(); return; }
+        if (renderer == null) return;
         boolean systemPaging = autoDetection && pagingMode != PagingMode.PAGE;
         List<SystemRef> shown = currentVisibleSystems();
         int nextPage;
@@ -864,13 +954,12 @@ public class MainActivity extends Activity {
             folderPdfIndex++;
             openPdf(folderPdfs.get(folderPdfIndex));
             return;
-        } else Toast.makeText(this, "Ende der Noten", Toast.LENGTH_SHORT).show();
+        } else showBanner("Ende der Noten", false);
         renderSystem();
     }
 
     private void previous() {
-        if (editMode) { undoManualEdit(); return; }
-        if (renderer == null) { pickPdf(); return; }
+        if (renderer == null) return;
         boolean systemPaging = autoDetection && pagingMode != PagingMode.PAGE;
         List<SystemRef> shown = currentVisibleSystems();
         int previousPage;
@@ -897,7 +986,7 @@ public class MainActivity extends Activity {
             folderPdfIndex--;
             openPdf(folderPdfs.get(folderPdfIndex), true);
             return;
-        } else Toast.makeText(this, "Anfang der Noten", Toast.LENGTH_SHORT).show();
+        } else showBanner("Anfang der Noten", false);
         renderSystem();
     }
 
@@ -1241,22 +1330,25 @@ public class MainActivity extends Activity {
         if (startPage != null) startPage.setVisibility(renderer == null ? View.VISIBLE : View.GONE);
         if (topOverlay != null && renderer == null) topOverlay.setVisibility(View.GONE);
         if (info == null) return;
+        titleView.setText(displayName);
+        if (renderer == null) { info.setText(""); return; }
+        String separator = "  ·  ";
+        String filePosition = folderPdfIndex >= 0 ? separator + "PDF " + (folderPdfIndex + 1) + "/" + folderPdfs.size() : "";
+        String pagePosition = "Seite " + (pageIndex + 1) + "/" + renderer.getPageCount();
         if (!autoDetection || pagingMode == PagingMode.PAGE) {
-            String filePosition = folderPdfIndex >= 0 ? "   •   PDF " + (folderPdfIndex + 1) + "/" + folderPdfs.size() : "";
             int markedSystems = manualPageRatios.containsKey(pageIndex) ? manualPageRatios.get(pageIndex).length / 2 : 0;
-            String mode = editMode ? "Bearbeiten • " + markedSystems + " Systeme" : "Seitenmodus";
-            info.setText(displayName + (renderer == null ? "" : "\nSeite " + (pageIndex + 1) + "/" + renderer.getPageCount() + filePosition + "   •   " + mode));
+            String mode = editMode ? "Bearbeiten: " + markedSystems + " Systeme" : "Seitenmodus";
+            info.setText(pagePosition + filePosition + separator + mode);
             return;
         }
         int count = currentSystemCount();
         boolean detected = autoDetection && pageIndex < pageSystems.size() && pageSystems.get(pageIndex) != null && pageSystems.get(pageIndex).count() > 0;
-        String visible = visibleSystemCount > 1 ? "   •   " + visibleSystemCount + " im Bild" : "";
-        String filePosition = folderPdfIndex >= 0 ? "   •   PDF " + (folderPdfIndex + 1) + "/" + folderPdfs.size() : "";
-        info.setText(displayName + (renderer == null ? "" : "\nSeite " + (pageIndex + 1) + "/" + renderer.getPageCount() + filePosition + "   •   System " + (systemIndex + 1) + "/" + count + visible + (autoDetection ? (detected ? " Auto" : " Fallback") : " Manuell")));
+        String visible = visibleSystemCount > 1 ? separator + visibleSystemCount + " im Bild" : "";
+        info.setText(pagePosition + filePosition + separator + "System " + (systemIndex + 1) + "/" + count + visible + (detected ? "" : " (Fallback)"));
     }
 
     @Override public void onWindowFocusChanged(boolean hasFocus) { super.onWindowFocusChanged(hasFocus); if (hasFocus) immersive(); }
-    @Override protected void onDestroy() { openRequestId++; uiHandler.removeCallbacks(hideControlsTask); sidecarExecutor.shutdown(); closePdf(); super.onDestroy(); }
+    @Override protected void onDestroy() { openRequestId++; uiHandler.removeCallbacks(hideControlsTask); uiHandler.removeCallbacks(hideBannerTask); sidecarExecutor.shutdown(); closePdf(); super.onDestroy(); }
 }
 
 
