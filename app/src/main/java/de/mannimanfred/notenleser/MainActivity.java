@@ -1640,6 +1640,34 @@ public class MainActivity extends Activity {
         info.setText(pagePosition + filePosition + separator + "System " + (systemIndex + 1) + "/" + count + visible + (detected ? "" : " (Fallback)"));
     }
 
+    /**
+     * Bluetooth page turners pose as keyboards and send arrow, page or media keys. They are handled here,
+     * before the focusable buttons could use arrow keys or space for focus navigation.
+     */
+    @Override public boolean dispatchKeyEvent(android.view.KeyEvent event) {
+        int direction = pedalDirection(event.getKeyCode());
+        if (direction == 0 || renderer == null) return super.dispatchKeyEvent(event);
+        // A held pedal repeats its key; it should still turn only once.
+        if (event.getAction() == android.view.KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
+            if (direction > 0) next(); else previous();
+        }
+        return true;
+    }
+
+    private static int pedalDirection(int keyCode) {
+        switch (keyCode) {
+            case android.view.KeyEvent.KEYCODE_DPAD_RIGHT: case android.view.KeyEvent.KEYCODE_DPAD_DOWN:
+            case android.view.KeyEvent.KEYCODE_PAGE_DOWN: case android.view.KeyEvent.KEYCODE_SPACE:
+            case android.view.KeyEvent.KEYCODE_ENTER: case android.view.KeyEvent.KEYCODE_MEDIA_NEXT:
+                return 1;
+            case android.view.KeyEvent.KEYCODE_DPAD_LEFT: case android.view.KeyEvent.KEYCODE_DPAD_UP:
+            case android.view.KeyEvent.KEYCODE_PAGE_UP: case android.view.KeyEvent.KEYCODE_MEDIA_PREVIOUS:
+                return -1;
+            default:
+                return 0;
+        }
+    }
+
     @Override protected void onResume() { super.onResume(); resumed = true; updateCameraGestures(); }
     @Override protected void onPause() { resumed = false; updateCameraGestures(); super.onPause(); }
     @Override public void onWindowFocusChanged(boolean hasFocus) { super.onWindowFocusChanged(hasFocus); if (hasFocus) immersive(); }
