@@ -43,7 +43,6 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.ArrayDeque;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -366,8 +365,14 @@ public class MainActivity extends Activity {
         if (request == PICK_FOLDER && result == RESULT_OK && data != null && data.getData() != null) {
             Uri tree = data.getData();
             folderTreeUri = tree;
-            int granted = data.getFlags() & (Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
-            try { getContentResolver().takePersistableUriPermission(tree, granted); } catch (Exception ignored) { }
+            // Persist read and write separately; takePersistableUriPermission only accepts these flag constants.
+            int granted = data.getFlags();
+            try {
+                if ((granted & Intent.FLAG_GRANT_READ_URI_PERMISSION) != 0)
+                    getContentResolver().takePersistableUriPermission(tree, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                if ((granted & Intent.FLAG_GRANT_WRITE_URI_PERMISSION) != 0)
+                    getContentResolver().takePersistableUriPermission(tree, Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+            } catch (Exception ignored) { }
             getPreferences(MODE_PRIVATE).edit().putString("folder_tree", tree.toString()).remove("pdf").apply();
             folderPdfs.clear(); folderPdfIndex = -1;
             new Thread(() -> loadFolderPdfs(tree), "notenleser-folder-loader").start();
@@ -408,7 +413,7 @@ public class MainActivity extends Activity {
                     }
                 }
             }
-            found.sort(Comparator.comparing(this::queryDisplayName, String.CASE_INSENSITIVE_ORDER));
+            Collections.sort(found, (a, b) -> String.CASE_INSENSITIVE_ORDER.compare(queryDisplayName(a), queryDisplayName(b)));
             runOnUiThread(() -> {
                 if (isFinishing() || isDestroyed()) return;
                 if (found.isEmpty()) {
@@ -694,7 +699,7 @@ public class MainActivity extends Activity {
                 range[1] = range[0] + height;
             }
             float[] edited = range;
-            ranges.sort(Comparator.comparingDouble(value -> value[0]));
+            Collections.sort(ranges, (a, b) -> Float.compare(a[0], b[0]));
             selectedManualSystemIndex = ranges.indexOf(edited);
             selectedManualPageIndex = pageIndex;
             setManualRanges(pageIndex, ranges, width);
@@ -712,7 +717,7 @@ public class MainActivity extends Activity {
         pushManualUndoSnapshot(pageIndex);
         float[] added = new float[]{top / (float) pageHeight, bottom / (float) pageHeight};
         ranges.add(added);
-        ranges.sort(Comparator.comparingDouble(range -> range[0]));
+        Collections.sort(ranges, (a, b) -> Float.compare(a[0], b[0]));
         selectedManualSystemIndex = ranges.indexOf(added);
         selectedManualPageIndex = pageIndex;
         setManualRanges(pageIndex, ranges, width);
