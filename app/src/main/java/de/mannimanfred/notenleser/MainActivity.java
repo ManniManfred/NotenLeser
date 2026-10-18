@@ -73,6 +73,11 @@ public class MainActivity extends Activity {
     private static final int MAX_VOICE = 6;
     /** Shows the following system too, shrinking both if needed, so the player can read ahead. */
     private boolean twoSystemsMinimum;
+    /** Turns to the next or previous system when a hand is swiped in front of the front camera. */
+    private boolean cameraGestures;
+    private static final int CAMERA_PERMISSION_REQUEST = 43;
+    private CameraGestureDetector cameraGestureDetector;
+    private boolean resumed;
     private final Set<Integer> manualPages = new HashSet<>();
     private final ArrayDeque<ManualSnapshot> manualUndoHistory = new ArrayDeque<>();
     private final ExecutorService sidecarExecutor = Executors.newSingleThreadExecutor();
@@ -119,6 +124,7 @@ public class MainActivity extends Activity {
         immersive();
         voice = getPreferences(MODE_PRIVATE).getInt("voice", 0);
         twoSystemsMinimum = getPreferences(MODE_PRIVATE).getBoolean("two_systems_minimum", false);
+        cameraGestures = getPreferences(MODE_PRIVATE).getBoolean("camera_gestures", false);
         buildUi();
         String savedFolder = getPreferences(MODE_PRIVATE).getString("folder_tree", null);
         if (savedFolder != null) {
@@ -251,6 +257,7 @@ public class MainActivity extends Activity {
         scoreView.addOnLayoutChangeListener((v, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> {
             if ((right - left != oldRight - oldLeft || bottom - top != oldBottom - oldTop) && renderer != null)
                 renderSystem();
+            if (cameraGestureDetector != null) cameraGestureDetector.setDisplayRotation(displayRotationDegrees());
         });
         root.addView(scoreView, new FrameLayout.LayoutParams(-1, -1));
 
@@ -466,6 +473,20 @@ public class MainActivity extends Activity {
         twoSystemsHint.setText("Das folgende System ist schon zu sehen, damit du vorauslesen kannst. Passen beide nicht auf den Bildschirm, werden sie verkleinert.");
         twoSystemsHint.setPadding(0, 0, 0, dp(6));
         content.addView(twoSystemsHint);
+        TextView controlHeading = new TextView(this); controlHeading.setText("Steuerung"); controlHeading.setTextSize(16);
+        controlHeading.setTextColor(Color.rgb(33, 33, 33));
+        controlHeading.setTypeface(android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL));
+        controlHeading.setPadding(0, dp(16), 0, 0);
+        content.addView(controlHeading);
+        android.widget.CheckBox cameraSwipe = new android.widget.CheckBox(this);
+        cameraSwipe.setText("Mit Handbewegung vor der Frontkamera blättern"); cameraSwipe.setTextSize(15);
+        cameraSwipe.setChecked(cameraGestures);
+        content.addView(cameraSwipe);
+        TextView cameraHint = new TextView(this); cameraHint.setTextSize(13); cameraHint.setTextColor(Color.rgb(110, 110, 110));
+        cameraHint.setText("Hand vor der Kamera von rechts nach links führen: nächstes System; von links nach rechts: vorheriges System. "
+                + "Die Kamerabilder werden nur auf dem Gerät ausgewertet und nicht gespeichert.");
+        cameraHint.setPadding(0, 0, 0, dp(6));
+        content.addView(cameraHint);
         scroll.addView(content);
         new AlertDialog.Builder(this)
                 .setTitle("Einstellungen")
@@ -475,6 +496,7 @@ public class MainActivity extends Activity {
                     View checked = choices.findViewById(choices.getCheckedRadioButtonId());
                     setVoice(checked == null ? 0 : (Integer) checked.getTag());
                     setTwoSystemsMinimum(twoSystems.isChecked());
+                    setCameraGestures(cameraSwipe.isChecked());
                 }).show();
     }
 
@@ -495,6 +517,57 @@ public class MainActivity extends Activity {
         twoSystemsMinimum = enabled;
         getPreferences(MODE_PRIVATE).edit().putBoolean("two_systems_minimum", enabled).apply();
         if (renderer != null) renderSystem();
+    }
+
+    private void setCameraGestures(boolean enabled) {
+        if (enabled && checkSelfPermission(android.Manifest.permission.CAMERA) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            // The option is only stored once the permission is granted, see onRequestPermissionsResult.
+            requestPermissions(new String[]{android.Manifest.permission.CAMERA}, CAMERA_PERMISSION_REQUEST);
+            return;
+        }
+        if (enabled == cameraGestures) return;
+        cameraGestures = enabled;
+        getPreferences(MODE_PRIVATE).edit().putBoolean("camera_gestures", enabled).apply();
+        updateCameraGestures();
+        if (enabled) showBanner("Handbewegung vor der Frontkamera blättert", false);
+    }
+
+    @Override public void onRequestPermissionsResult(int request, String[] permissions, int[] results) {
+        super.onRequestPermissionsResult(request, permissions, results);
+        if (request != CAMERA_PERMISSION_REQUEST) return;
+        if (results.length > 0 && results[0] == android.content.pm.PackageManager.PERMISSION_GRANTED) setCameraGestures(true);
+        else Toast.makeText(this, "Ohne Kamerazugriff ist das Blättern per Handbewegung nicht möglich", Toast.LENGTH_LONG).show();
+    }
+
+    /** Runs the camera only while the option is on and the app is in the foreground. */
+    private void updateCameraGestures() {
+        boolean run = cameraGestures && resumed
+                && checkSelfPermission(android.Manifest.permission.CAMERA) == android.content.pm.PackageManager.PERMISSION_GRANTED;
+        if (!run) {
+            if (cameraGestureDetector != null) cameraGestureDetector.stop();
+            return;
+        }
+        if (cameraGestureDetector == null) cameraGestureDetector = new CameraGestureDetector(this, new CameraGestureDetector.Listener() {
+            @Override public void onSwipe(int direction) {
+                if (renderer == null) return;
+                if (direction > 0) next(); else previous();
+            }
+
+            @Override public void onCameraError(String message) {
+                Toast.makeText(MainActivity.this, message, Toast.LENGTH_LONG).show();
+            }
+        });
+        cameraGestureDetector.start(displayRotationDegrees());
+    }
+
+    @SuppressWarnings("deprecation")
+    private int displayRotationDegrees() {
+        switch (getWindowManager().getDefaultDisplay().getRotation()) {
+            case android.view.Surface.ROTATION_90: return 90;
+            case android.view.Surface.ROTATION_180: return 180;
+            case android.view.Surface.ROTATION_270: return 270;
+            default: return 0;
+        }
     }
 
     private float averageX(MotionEvent e) {
@@ -1516,8 +1589,10 @@ public class MainActivity extends Activity {
         info.setText(pagePosition + filePosition + separator + "System " + (systemIndex + 1) + "/" + count + visible + (detected ? "" : " (Fallback)"));
     }
 
+    @Override protected void onResume() { super.onResume(); resumed = true; updateCameraGestures(); }
+    @Override protected void onPause() { resumed = false; updateCameraGestures(); super.onPause(); }
     @Override public void onWindowFocusChanged(boolean hasFocus) { super.onWindowFocusChanged(hasFocus); if (hasFocus) immersive(); }
-    @Override protected void onDestroy() { openRequestId++; uiHandler.removeCallbacks(hideControlsTask); uiHandler.removeCallbacks(hideBannerTask); sidecarExecutor.shutdown(); closePdf(); super.onDestroy(); }
+    @Override protected void onDestroy() { openRequestId++; uiHandler.removeCallbacks(hideControlsTask); uiHandler.removeCallbacks(hideBannerTask); sidecarExecutor.shutdown(); closePdf(); if (cameraGestureDetector != null) cameraGestureDetector.shutdown(); super.onDestroy(); }
 }
 
 
