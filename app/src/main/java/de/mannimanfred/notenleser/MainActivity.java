@@ -12,11 +12,9 @@ import android.graphics.Matrix;
 import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.drawable.GradientDrawable;
-import android.graphics.pdf.PdfRenderer;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
-import android.os.ParcelFileDescriptor;
 import android.provider.OpenableColumns;
 import android.provider.DocumentsContract;
 import android.view.Gravity;
@@ -57,9 +55,7 @@ public class MainActivity extends Activity {
     private static final int PICK_PDF = 41;
     private static final int PICK_FOLDER = 42;
     private Uri pdfUri;
-    private ParcelFileDescriptor descriptor;
-    private PdfRenderer renderer;
-    private File cachedPdf;
+    private ScoreDocument renderer;
     private int pageIndex = 0;
     private int systemIndex = 0;
     private int visibleSystemCount = 1;
@@ -258,12 +254,12 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams headingParams = new LinearLayout.LayoutParams(-2, -2);
         headingParams.topMargin = dp(8); startPage.addView(heading, headingParams);
         TextView intro = new TextView(this);
-        intro.setText("Öffne eine Noten-PDF oder wähle einen Ordner mit mehreren PDFs.");
+        intro.setText("Öffne eine Noten-PDF oder MuseScore-Datei oder wähle einen Ordner mit Noten.");
         intro.setTextSize(16); intro.setTextColor(Color.rgb(190, 197, 205)); intro.setGravity(Gravity.CENTER);
         intro.setMaxWidth(dp(360));
         LinearLayout.LayoutParams introParams = new LinearLayout.LayoutParams(-2, -2);
         introParams.topMargin = dp(10); introParams.bottomMargin = dp(28); startPage.addView(intro, introParams);
-        TextView openPdf = button("PDF öffnen", this::pickPdf);
+        TextView openPdf = button("Noten öffnen", this::pickPdf);
         openPdf.setTextSize(16); openPdf.setBackground(startActionBackground(true));
         LinearLayout.LayoutParams actionParams = new LinearLayout.LayoutParams(dp(260), dp(54));
         startPage.addView(openPdf, actionParams);
@@ -411,7 +407,7 @@ public class MainActivity extends Activity {
     private void chooseSource() {
         new AlertDialog.Builder(this)
                 .setTitle("Noten öffnen")
-                .setItems(new String[]{"Einzelne PDF auswählen", "Ordner mit PDFs auswählen"}, (dialog, which) -> {
+                .setItems(new String[]{"Einzelne Datei auswählen (PDF, MuseScore)", "Ordner mit Noten auswählen"}, (dialog, which) -> {
                     if (which == 0) pickPdf(); else pickFolder();
                 }).show();
     }
@@ -433,7 +429,12 @@ public class MainActivity extends Activity {
 
     private void pickPdf() {
         Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT); i.addCategory(Intent.CATEGORY_OPENABLE);
-        i.setType("application/pdf"); i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+        // MuseScore files often arrive without a specific MIME type, so generic types stay selectable.
+        i.setType("*/*");
+        i.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{"application/pdf", "application/x-musescore",
+                "application/x-musescore+xml", "application/vnd.musescore", "application/octet-stream",
+                "application/zip", "application/xml", "text/xml"});
+        i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
         startActivityForResult(i, PICK_PDF);
     }
 
@@ -488,7 +489,7 @@ public class MainActivity extends Activity {
                     while (cursor.moveToNext()) {
                         String name = nameColumn >= 0 ? cursor.getString(nameColumn) : "";
                         String mime = mimeColumn >= 0 ? cursor.getString(mimeColumn) : "";
-                        if (idColumn >= 0 && name != null && name.toLowerCase(java.util.Locale.ROOT).endsWith(".pdf")
+                        if (idColumn >= 0 && name != null && isScoreFileName(name)
                                 && !DocumentsContract.Document.MIME_TYPE_DIR.equals(mime)) {
                             found.add(DocumentsContract.buildDocumentUriUsingTree(tree, cursor.getString(idColumn)));
                         }
@@ -499,7 +500,7 @@ public class MainActivity extends Activity {
             runOnUiThread(() -> {
                 if (isFinishing() || isDestroyed()) return;
                 if (found.isEmpty()) {
-                    Toast.makeText(this, "In diesem Ordner wurden keine PDFs gefunden", Toast.LENGTH_LONG).show();
+                    Toast.makeText(this, "In diesem Ordner wurden keine PDF- oder MuseScore-Dateien gefunden", Toast.LENGTH_LONG).show();
                     return;
                 }
                 folderPdfs.clear(); folderPdfs.addAll(found);
@@ -511,12 +512,17 @@ public class MainActivity extends Activity {
                     }
                 }
                 openPdf(folderPdfs.get(folderPdfIndex));
-                Toast.makeText(this, found.size() + " PDFs im Ordner gefunden", Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, found.size() + " Notendateien im Ordner gefunden", Toast.LENGTH_SHORT).show();
             });
         } catch (Exception e) {
             String details = describeCause(e);
             runOnUiThread(() -> Toast.makeText(this, "Ordner konnte nicht gelesen werden: " + details, Toast.LENGTH_LONG).show());
         }
+    }
+
+    private static boolean isScoreFileName(String name) {
+        String lower = name.toLowerCase(java.util.Locale.ROOT);
+        return lower.endsWith(".pdf") || lower.endsWith(".mscz") || lower.endsWith(".mscx");
     }
 
     private Uri findSidecar(Uri tree, String sidecarName) {
@@ -546,7 +552,8 @@ public class MainActivity extends Activity {
     private String sidecarName(Uri pdf) {
         String name = queryDisplayName(pdf);
         int extension = name.lastIndexOf('.');
-        if (extension > 0) name = name.substring(0, extension);
+        // Only PDFs drop their extension, so "Lied.pdf" and "Lied.mscz" in one folder keep separate files.
+        if (extension > 0 && name.substring(extension).equalsIgnoreCase(".pdf")) name = name.substring(0, extension);
         return name + ".systems.json";
     }
 
@@ -610,35 +617,51 @@ public class MainActivity extends Activity {
         new Thread(() -> loadPdf(uri, requestId, startAtLastPage, sidecarTree), "notenleser-pdf-loader").start();
     }
 
-    private void loadPdf(Uri uri, int requestId, boolean startAtLastPage, Uri sidecarTree) {
-        File localCopy = null;
-        ParcelFileDescriptor localDescriptor = null;
-        PdfRenderer localRenderer = null;
+    /** Opens a PDF or MuseScore file; the format is recognised from the file name and content. */
+    private ScoreDocument loadScoreDocument(Uri uri, String name) throws IOException {
+        byte[] head = new byte[512];
+        int headLength = 0;
+        File localCopy = File.createTempFile("notenleser_", ".score", getCacheDir());
         try {
-            localCopy = File.createTempFile("notenleser_", ".pdf", getCacheDir());
             try (InputStream input = getContentResolver().openInputStream(uri);
                  OutputStream output = new FileOutputStream(localCopy)) {
                 if (input == null) throw new IOException("Nextcloud hat keinen lesbaren Dateistream geliefert");
                 byte[] buffer = new byte[32 * 1024];
                 int read;
-                while ((read = input.read(buffer)) != -1) output.write(buffer, 0, read);
+                while ((read = input.read(buffer)) != -1) {
+                    if (headLength < head.length) {
+                        int copied = Math.min(read, head.length - headLength);
+                        System.arraycopy(buffer, 0, head, headLength, copied);
+                        headLength += copied;
+                    }
+                    output.write(buffer, 0, read);
+                }
             }
-            localDescriptor = ParcelFileDescriptor.open(localCopy, ParcelFileDescriptor.MODE_READ_ONLY);
-            localRenderer = new PdfRenderer(localDescriptor);
-            final Map<Integer, float[]> loadedSidecar = readSystemSidecar(sidecarTree, uri);
+            byte[] start = java.util.Arrays.copyOf(head, headLength);
+            boolean pdf = headLength >= 4 && head[0] == '%' && head[1] == 'P' && head[2] == 'D' && head[3] == 'F';
+            if (!pdf && MuseScoreReader.looksLikeMuseScore(start, name)) {
+                byte[] data;
+                try (InputStream input = new java.io.FileInputStream(localCopy)) { data = MuseScoreReader.readAll(input, 64 * 1024 * 1024); }
+                localCopy.delete();
+                return new MuseScoreDocument(this, data);
+            }
+            return new PdfScoreDocument(localCopy);
+        } catch (IOException | RuntimeException e) {
+            localCopy.delete();
+            throw e;
+        }
+    }
+
+    private void loadPdf(Uri uri, int requestId, boolean startAtLastPage, Uri sidecarTree) {
+        try {
             final String loadedName = queryDisplayName(uri);
-            final File loadedFile = localCopy;
-            final ParcelFileDescriptor loadedDescriptor = localDescriptor;
-            final PdfRenderer loadedRenderer = localRenderer;
+            final ScoreDocument loadedRenderer = loadScoreDocument(uri, loadedName);
+            final Map<Integer, float[]> loadedSidecar = readSystemSidecar(sidecarTree, uri);
             runOnUiThread(() -> {
                 if (requestId != openRequestId || isFinishing() || isDestroyed()) {
                     loadedRenderer.close();
-                    try { loadedDescriptor.close(); } catch (IOException ignored) { }
-                    loadedFile.delete();
                     return;
                 }
-                cachedPdf = loadedFile;
-                descriptor = loadedDescriptor;
                 renderer = loadedRenderer;
                 displayName = loadedName;
                 pdfUri = uri; pageIndex = startAtLastPage ? loadedRenderer.getPageCount() - 1 : 0; systemIndex = 0;
@@ -658,14 +681,11 @@ public class MainActivity extends Activity {
                 revealScore();
             });
         } catch (Exception e) {
-            if (localRenderer != null) localRenderer.close();
-            if (localDescriptor != null) try { localDescriptor.close(); } catch (IOException ignored) { }
-            if (localCopy != null) localCopy.delete();
             final String details = describeCause(e);
             runOnUiThread(() -> {
                 if (requestId == openRequestId && !isFinishing() && !isDestroyed()) {
                     hideBanner(); revealScore();
-                    Toast.makeText(this, "PDF-Lesefehler: " + details, Toast.LENGTH_LONG).show();
+                    Toast.makeText(this, "Lesefehler: " + details, Toast.LENGTH_LONG).show();
                 }
             });
         }
@@ -688,13 +708,11 @@ public class MainActivity extends Activity {
                 }
             }
         } catch (Exception ignored) { }
-        return "Noten-PDF";
+        return "Noten";
     }
 
     private void closePdf() {
         if (renderer != null) { renderer.close(); renderer = null; }
-        if (descriptor != null) { try { descriptor.close(); } catch (IOException ignored) { } descriptor = null; }
-        if (cachedPdf != null) { cachedPdf.delete(); cachedPdf = null; }
     }
 
     private void toggleDetection() {
@@ -711,7 +729,7 @@ public class MainActivity extends Activity {
 
     private void toggleEditMode() {
         if (renderer == null) {
-            Toast.makeText(this, "Bitte zuerst eine PDF öffnen", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "Bitte zuerst Noten öffnen", Toast.LENGTH_SHORT).show();
             return;
         }
         if (!editMode && (folderTreeUri == null || !hasFolderWritePermission())) {
@@ -1009,6 +1027,13 @@ public class MainActivity extends Activity {
         }
         PageSystems systems = pageSystems.get(pageIndex);
         if (systems != null) return systems;
+        // Engraved scores know their systems; only scanned or PDF pages need detection.
+        float[] known = renderer.systemRatios(pageIndex);
+        if (known != null) {
+            systems = pageSystemsFromRatios(pageIndex, width, known);
+            pageSystems.set(pageIndex, systems);
+            return systems;
+        }
         Bitmap bitmap = renderPageBitmap(pageIndex, width);
         systems = detectSystems(bitmap);
         bitmap.recycle();
@@ -1017,9 +1042,7 @@ public class MainActivity extends Activity {
     }
 
     private int pageBitmapHeight(int pageIndex, int width) {
-        PdfRenderer.Page page = renderer.openPage(pageIndex);
-        try { return Math.max(1, Math.round(width * page.getHeight() / (float) page.getWidth())); }
-        finally { page.close(); }
+        return Math.max(1, Math.round(width * renderer.pageAspect(pageIndex)));
     }
 
     private void drawManualOverlay(Bitmap bitmap, int page) {
@@ -1056,14 +1079,7 @@ public class MainActivity extends Activity {
     }
 
     private Bitmap renderPageBitmap(int pageIndex, int width) {
-        PdfRenderer.Page page = renderer.openPage(pageIndex);
-        try {
-            int height = Math.max(1, Math.round(width * page.getHeight() / (float) page.getWidth()));
-            Bitmap bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
-            bitmap.eraseColor(Color.WHITE);
-            page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY);
-            return bitmap;
-        } finally { page.close(); }
+        return renderer.renderPage(pageIndex, width);
     }
 
     private float baseImageScale() {
@@ -1211,10 +1227,7 @@ public class MainActivity extends Activity {
         boolean useDetection = autoDetection && systems.count() > 0;
         int count = systemCount(page, systems);
         if (index < 0 || index >= count) return null;
-        PdfRenderer.Page pdfPage = renderer.openPage(page);
-        int pageHeight;
-        try { pageHeight = Math.max(1, Math.round(width * pdfPage.getHeight() / (float) pdfPage.getWidth())); }
-        finally { pdfPage.close(); }
+        int pageHeight = pageBitmapHeight(page, width);
         return new SystemRef(page, index,
                 systemTop(index, pageHeight, count, systems, useDetection),
                 systemBottom(index, pageHeight, count, systems, useDetection));
