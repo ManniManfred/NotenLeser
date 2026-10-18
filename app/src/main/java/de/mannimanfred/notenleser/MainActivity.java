@@ -71,6 +71,8 @@ public class MainActivity extends Activity {
     /** The player's voice as staff number within a system (1 = top staff), 0 when nothing is highlighted. */
     private int voice;
     private static final int MAX_VOICE = 6;
+    /** Shows the following system too, shrinking both if needed, so the player can read ahead. */
+    private boolean twoSystemsMinimum;
     private final Set<Integer> manualPages = new HashSet<>();
     private final ArrayDeque<ManualSnapshot> manualUndoHistory = new ArrayDeque<>();
     private final ExecutorService sidecarExecutor = Executors.newSingleThreadExecutor();
@@ -116,6 +118,7 @@ public class MainActivity extends Activity {
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         immersive();
         voice = getPreferences(MODE_PRIVATE).getInt("voice", 0);
+        twoSystemsMinimum = getPreferences(MODE_PRIVATE).getBoolean("two_systems_minimum", false);
         buildUi();
         String savedFolder = getPreferences(MODE_PRIVATE).getString("folder_tree", null);
         if (savedFolder != null) {
@@ -450,6 +453,19 @@ public class MainActivity extends Activity {
         }
         android.widget.ScrollView scroll = new android.widget.ScrollView(this);
         content.addView(choices);
+        TextView displayHeading = new TextView(this); displayHeading.setText("Anzeige"); displayHeading.setTextSize(16);
+        displayHeading.setTextColor(Color.rgb(33, 33, 33));
+        displayHeading.setTypeface(android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL));
+        displayHeading.setPadding(0, dp(16), 0, 0);
+        content.addView(displayHeading);
+        android.widget.CheckBox twoSystems = new android.widget.CheckBox(this);
+        twoSystems.setText("Immer mindestens 2 Systeme anzeigen"); twoSystems.setTextSize(15);
+        twoSystems.setChecked(twoSystemsMinimum);
+        content.addView(twoSystems);
+        TextView twoSystemsHint = new TextView(this); twoSystemsHint.setTextSize(13); twoSystemsHint.setTextColor(Color.rgb(110, 110, 110));
+        twoSystemsHint.setText("Das folgende System ist schon zu sehen, damit du vorauslesen kannst. Passen beide nicht auf den Bildschirm, werden sie verkleinert.");
+        twoSystemsHint.setPadding(0, 0, 0, dp(6));
+        content.addView(twoSystemsHint);
         scroll.addView(content);
         new AlertDialog.Builder(this)
                 .setTitle("Einstellungen")
@@ -458,6 +474,7 @@ public class MainActivity extends Activity {
                 .setPositiveButton("Übernehmen", (dialog, which) -> {
                     View checked = choices.findViewById(choices.getCheckedRadioButtonId());
                     setVoice(checked == null ? 0 : (Integer) checked.getTag());
+                    setTwoSystemsMinimum(twoSystems.isChecked());
                 }).show();
     }
 
@@ -471,6 +488,13 @@ public class MainActivity extends Activity {
             renderSystem();
             showBanner(voice == 0 ? "Keine Stimme hervorgehoben" : voiceName(voice) + " wird hervorgehoben", false);
         }
+    }
+
+    private void setTwoSystemsMinimum(boolean enabled) {
+        if (enabled == twoSystemsMinimum) return;
+        twoSystemsMinimum = enabled;
+        getPreferences(MODE_PRIVATE).edit().putBoolean("two_systems_minimum", enabled).apply();
+        if (renderer != null) renderSystem();
     }
 
     private float averageX(MotionEvent e) {
@@ -1281,7 +1305,7 @@ public class MainActivity extends Activity {
                 if (canLookBack && !canLookForward) {
                     SystemRef candidate = adjacentSystem(previousCursor, -1, width);
                     if (candidate == null) canLookBack = false;
-                    else if (usedHeight + gapHeight + candidate.height() <= maxCropHeight) {
+                    else if (fitsOnScreen(usedHeight, gapHeight, candidate, maxCropHeight, before.size() + after.size() + 1)) {
                         before.add(candidate); previousCursor = candidate;
                         usedHeight += gapHeight + candidate.height(); added = true;
                     } else canLookBack = false;
@@ -1289,7 +1313,7 @@ public class MainActivity extends Activity {
                 if (canLookForward) {
                     SystemRef candidate = adjacentSystem(nextCursor, 1, width);
                     if (candidate == null) canLookForward = false;
-                    else if (usedHeight + gapHeight + candidate.height() <= maxCropHeight) {
+                    else if (fitsOnScreen(usedHeight, gapHeight, candidate, maxCropHeight, before.size() + after.size() + 1)) {
                         after.add(candidate); nextCursor = candidate;
                         usedHeight += gapHeight + candidate.height(); added = true;
                     } else canLookForward = false;
@@ -1306,6 +1330,11 @@ public class MainActivity extends Activity {
             scoreView.setImageBitmap(crop);
             applyImageTransform();
         } catch (Exception e) { Toast.makeText(this, "Seite konnte nicht dargestellt werden", Toast.LENGTH_SHORT).show(); }
+    }
+
+    /** Whether another system joins the screen; with the two-system minimum the second one always does. */
+    private boolean fitsOnScreen(int usedHeight, int gapHeight, SystemRef candidate, int maxCropHeight, int shownCount) {
+        return usedHeight + gapHeight + candidate.height() <= maxCropHeight || (twoSystemsMinimum && shownCount < 2);
     }
 
     private int maxCropHeight(int width) {
@@ -1327,12 +1356,12 @@ public class MainActivity extends Activity {
     /** Finds the earliest system of a screen that ends with the given system. */
     private SystemRef screenStartingBefore(SystemRef last, int width) {
         int maxCropHeight = maxCropHeight(width), gapHeight = gapHeight(width);
-        int usedHeight = last.height();
+        int usedHeight = last.height(), shownCount = 1;
         SystemRef first = last;
         while (true) {
             SystemRef candidate = adjacentSystem(first, -1, width);
-            if (candidate == null || usedHeight + gapHeight + candidate.height() > maxCropHeight) return first;
-            usedHeight += gapHeight + candidate.height();
+            if (candidate == null || !fitsOnScreen(usedHeight, gapHeight, candidate, maxCropHeight, shownCount)) return first;
+            usedHeight += gapHeight + candidate.height(); shownCount++;
             first = candidate;
         }
     }
