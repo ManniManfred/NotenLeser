@@ -23,7 +23,8 @@ import java.util.Collections;
 /**
  * Recognises a hand swiped sideways in front of the front camera.
  * Each frame is reduced to a coarse brightness grid; while cells keep changing, the centroid of the
- * change is tracked, and a mostly horizontal travel across the picture counts as a swipe.
+ * change is tracked, and a mostly horizontal travel across the picture counts as a swipe. With the
+ * fine sensitivity a small finger movement close to the camera is enough.
  * Frames are only analysed in memory and never stored.
  */
 final class CameraGestureDetector {
@@ -32,15 +33,43 @@ final class CameraGestureDetector {
         /** Called on the main thread: 1 when the hand moved to the player's left (like turning a page), -1 to the right. */
         void onSwipe(int direction);
         void onCameraError(String message);
+        /** Called on the main thread for every analysed frame while debugging is on. */
+        void onDebugFrame(DebugFrame frame);
     }
+
+    /** What the detector saw in one frame, already turned to match the screen as the player sees it. */
+    static final class DebugFrame {
+        /** Grid size in screen orientation. */
+        final int width, height;
+        /** Brightness (0–255) and change against the previous frame per cell, row by row. */
+        final float[] luma, change;
+        /** Share of changing cells and the share needed to count as motion. */
+        final float share, minMoving;
+        final boolean tracking;
+        /** Start and current motion centroid as shares of the screen-oriented picture; NaN without motion. */
+        final float startX, startY, x, y;
+        /** Horizontal travel since the start (negative = to the left) and the travel needed for a swipe. */
+        final float travel, minTravel;
+        /** Swipe recognised in this frame (see {@link Listener#onSwipe}), 0 otherwise. */
+        final int swipe;
+
+        DebugFrame(int width, int height, float[] luma, float[] change, float share, float minMoving, boolean tracking,
+                   float startX, float startY, float x, float y, float travel, float minTravel, int swipe) {
+            this.width = width; this.height = height; this.luma = luma; this.change = change;
+            this.share = share; this.minMoving = minMoving; this.tracking = tracking;
+            this.startX = startX; this.startY = startY; this.x = x; this.y = y;
+            this.travel = travel; this.minTravel = minTravel; this.swipe = swipe;
+        }
+    }
+
+    /** How far the finger or hand has to travel. */
+    static final int SENSITIVITY_FINE = 0, SENSITIVITY_MEDIUM = 1, SENSITIVITY_COARSE = 2;
 
     private static final int GRID_W = 32, GRID_H = 24;
     /** Brightness change of a grid cell (0–255) that counts as motion. */
-    private static final float CELL_THRESHOLD = 14f;
-    /** Share of changing cells needed for motion; above the maximum the whole picture changed (light, shaking). */
-    private static final float MIN_MOVING = .03f, MAX_MOVING = .75f;
-    /** Horizontal travel of the motion centroid, as a share of the picture width, that makes a swipe. */
-    private static final float MIN_TRAVEL = .35f;
+    static final float CELL_THRESHOLD = 14f;
+    /** Above this share of changing cells the whole picture changed (light, shaking) rather than a hand. */
+    private static final float MAX_MOVING = .75f;
     private static final long MAX_SWIPE_MS = 1200, COOLDOWN_MS = 900;
     private static final int MIN_ACTIVE_FRAMES = 3, QUIET_FRAMES_TO_END = 3;
 
@@ -51,6 +80,11 @@ final class CameraGestureDetector {
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private volatile boolean wanted;
     private volatile int displayRotation;
+    private volatile boolean debug;
+    /** Share of changing cells needed for motion; a close finger covers less of the picture than a hand. */
+    private volatile float minMoving = .01f;
+    /** Horizontal travel of the motion centroid, as a share of the picture width, that makes a swipe. */
+    private volatile float minTravel = .15f;
 
     // Everything below is only touched on the camera thread.
     private CameraDevice camera;
@@ -79,6 +113,16 @@ final class CameraGestureDetector {
     }
 
     void setDisplayRotation(int displayRotationDegrees) { displayRotation = displayRotationDegrees; }
+
+    void setSensitivity(int sensitivity) {
+        switch (sensitivity) {
+            case SENSITIVITY_COARSE: minMoving = .03f; minTravel = .35f; break;
+            case SENSITIVITY_MEDIUM: minMoving = .02f; minTravel = .25f; break;
+            default: minMoving = .01f; minTravel = .15f; break;
+        }
+    }
+
+    void setDebug(boolean enabled) { debug = enabled; }
 
     void stop() {
         wanted = false;
@@ -216,6 +260,8 @@ final class CameraGestureDetector {
                 frameSum += value;
             }
         }
+        boolean debugging = debug;
+        float[] rawLuma = debugging ? currentGrid.clone() : null;
         // Comparing cells against the frame mean ignores exposure changes that brighten everything at once.
         float frameMean = frameSum / currentGrid.length;
         for (int i = 0; i < currentGrid.length; i++) currentGrid[i] -= frameMean;
@@ -224,49 +270,90 @@ final class CameraGestureDetector {
         currentGrid = previous != null ? previous : new float[GRID_W * GRID_H];
         if (previous == null) return;
 
+        float[] changes = debugging ? new float[GRID_W * GRID_H] : null;
         int moving = 0;
         float weight = 0f, sumX = 0f, sumY = 0f;
         for (int gy = 0; gy < GRID_H; gy++) {
             for (int gx = 0; gx < GRID_W; gx++) {
                 float change = Math.abs(previousGrid[gy * GRID_W + gx] - previous[gy * GRID_W + gx]);
+                if (changes != null) changes[gy * GRID_W + gx] = change;
                 if (change < CELL_THRESHOLD) continue;
                 moving++; weight += change;
                 sumX += change * (gx + .5f) / GRID_W; sumY += change * (gy + .5f) / GRID_H;
             }
         }
-        long now = SystemClock.uptimeMillis();
-        if (now < cooldownUntil) { tracking = false; return; }
         float share = moving / (float) (GRID_W * GRID_H);
-        if (share < MIN_MOVING || share > MAX_MOVING) {
+        float x = moving == 0 ? Float.NaN : sumX / weight, y = moving == 0 ? Float.NaN : sumY / weight;
+        int swipe = track(share, x, y);
+        if (debugging) postDebugFrame(rawLuma, changes, share, x, y, swipe);
+    }
+
+    /** Follows the motion centroid and returns the recognised swipe direction, or 0. */
+    private int track(float share, float x, float y) {
+        long now = SystemClock.uptimeMillis();
+        if (now < cooldownUntil) { tracking = false; return 0; }
+        if (share < minMoving || share > MAX_MOVING) {
             if (tracking && ++quietFrames >= QUIET_FRAMES_TO_END) tracking = false;
-            return;
+            return 0;
         }
-        float x = sumX / weight, y = sumY / weight;
         if (!tracking || now - startTime > MAX_SWIPE_MS) {
             tracking = true; startX = x; startY = y; startTime = now; activeFrames = 0;
         }
         lastX = x; lastY = y; activeFrames++; quietFrames = 0;
-        if (activeFrames < MIN_ACTIVE_FRAMES) return;
+        if (activeFrames < MIN_ACTIVE_FRAMES) return 0;
         float[] travel = toScreen(lastX - startX, lastY - startY);
-        if (Math.abs(travel[0]) >= MIN_TRAVEL && Math.abs(travel[0]) > Math.abs(travel[1]) * 1.5f) {
-            tracking = false;
-            cooldownUntil = now + COOLDOWN_MS;
-            int direction = travel[0] < 0 ? 1 : -1;
-            mainHandler.post(() -> { if (wanted) listener.onSwipe(direction); });
-        }
+        if (Math.abs(travel[0]) < minTravel || Math.abs(travel[0]) <= Math.abs(travel[1]) * 1.5f) return 0;
+        tracking = false;
+        cooldownUntil = now + COOLDOWN_MS;
+        int direction = travel[0] < 0 ? 1 : -1;
+        mainHandler.post(() -> { if (wanted) listener.onSwipe(direction); });
+        return direction;
     }
+
+    private void postDebugFrame(float[] rawLuma, float[] changes, float share, float x, float y, int swipe) {
+        boolean turned = rotation() == 90 || rotation() == 270;
+        int width = turned ? GRID_H : GRID_W, height = turned ? GRID_W : GRID_H;
+        float[] luma = new float[width * height], change = new float[width * height];
+        for (int gy = 0; gy < GRID_H; gy++) {
+            for (int gx = 0; gx < GRID_W; gx++) {
+                float[] point = toScreenPoint((gx + .5f) / GRID_W, (gy + .5f) / GRID_H);
+                int sx = Math.min(width - 1, (int) (point[0] * width)), sy = Math.min(height - 1, (int) (point[1] * height));
+                luma[sy * width + sx] = rawLuma[gy * GRID_W + gx];
+                change[sy * width + sx] = changes[gy * GRID_W + gx];
+            }
+        }
+        float[] current = Float.isNaN(x) ? new float[]{Float.NaN, Float.NaN} : toScreenPoint(x, y);
+        float[] start = tracking || swipe != 0 ? toScreenPoint(startX, startY) : new float[]{Float.NaN, Float.NaN};
+        float travel = tracking || swipe != 0 ? toScreen(lastX - startX, lastY - startY)[0] : 0f;
+        DebugFrame frame = new DebugFrame(width, height, luma, change, share, minMoving, tracking,
+                start[0], start[1], current[0], current[1], travel, minTravel, swipe);
+        mainHandler.post(() -> { if (wanted && debug) listener.onDebugFrame(frame); });
+    }
+
+    /** Clockwise rotation from the mirrored sensor picture to the screen. */
+    private int rotation() { return (360 - (sensorOrientation + displayRotation) % 360) % 360; }
 
     /**
      * Maps a motion in sensor coordinates to the screen as the player sees it, like in a mirror:
      * the front camera picture is mirrored first and then rotated clockwise to match the display.
      */
     private float[] toScreen(float dx, float dy) {
-        int rotation = (360 - (sensorOrientation + displayRotation) % 360) % 360;
         float x = -dx, y = dy;
-        switch (rotation) {
+        switch (rotation()) {
             case 90: return new float[]{-y, x};
             case 180: return new float[]{-x, -y};
             case 270: return new float[]{y, -x};
+            default: return new float[]{x, y};
+        }
+    }
+
+    /** Like {@link #toScreen}, but for a position given as shares of the sensor picture. */
+    private float[] toScreenPoint(float u, float v) {
+        float x = 1f - u, y = v;
+        switch (rotation()) {
+            case 90: return new float[]{1f - y, x};
+            case 180: return new float[]{1f - x, 1f - y};
+            case 270: return new float[]{y, 1f - x};
             default: return new float[]{x, y};
         }
     }

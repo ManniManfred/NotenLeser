@@ -77,6 +77,11 @@ public class MainActivity extends Activity {
     private boolean cameraGestures;
     private static final int CAMERA_PERMISSION_REQUEST = 43;
     private CameraGestureDetector cameraGestureDetector;
+    /** How far the finger or hand has to move, see {@link CameraGestureDetector#setSensitivity}. */
+    private int cameraSensitivity;
+    /** Shows what the camera gesture detection sees. */
+    private boolean cameraDebug;
+    private GestureDebugView gestureDebugView;
     private boolean resumed;
     private final Set<Integer> manualPages = new HashSet<>();
     private final ArrayDeque<ManualSnapshot> manualUndoHistory = new ArrayDeque<>();
@@ -125,6 +130,8 @@ public class MainActivity extends Activity {
         voice = getPreferences(MODE_PRIVATE).getInt("voice", 0);
         twoSystemsMinimum = getPreferences(MODE_PRIVATE).getBoolean("two_systems_minimum", false);
         cameraGestures = getPreferences(MODE_PRIVATE).getBoolean("camera_gestures", false);
+        cameraSensitivity = getPreferences(MODE_PRIVATE).getInt("camera_sensitivity", CameraGestureDetector.SENSITIVITY_FINE);
+        cameraDebug = getPreferences(MODE_PRIVATE).getBoolean("camera_debug", false);
         buildUi();
         String savedFolder = getPreferences(MODE_PRIVATE).getString("folder_tree", null);
         if (savedFolder != null) {
@@ -343,6 +350,13 @@ public class MainActivity extends Activity {
         FrameLayout.LayoutParams bannerParams = new FrameLayout.LayoutParams(-2, -2, Gravity.CENTER);
         root.addView(banner, bannerParams);
 
+        // Not clickable, so touches still reach the score below.
+        gestureDebugView = new GestureDebugView(this);
+        gestureDebugView.setElevation(dp(6)); gestureDebugView.setVisibility(View.GONE);
+        FrameLayout.LayoutParams debugParams = new FrameLayout.LayoutParams(dp(210), dp(230), Gravity.BOTTOM | Gravity.RIGHT);
+        debugParams.setMargins(0, 0, dp(12), dp(12));
+        root.addView(gestureDebugView, debugParams);
+
         updateToolButtons();
         setContentView(root); refreshInfo(); showControls();
     }
@@ -483,10 +497,29 @@ public class MainActivity extends Activity {
         cameraSwipe.setChecked(cameraGestures);
         content.addView(cameraSwipe);
         TextView cameraHint = new TextView(this); cameraHint.setTextSize(13); cameraHint.setTextColor(Color.rgb(110, 110, 110));
-        cameraHint.setText("Hand vor der Kamera von rechts nach links führen: nächstes System; von links nach rechts: vorheriges System. "
+        cameraHint.setText("Finger oder Hand vor der Kamera von rechts nach links bewegen: nächstes System; von links nach rechts: vorheriges System. "
                 + "Die Kamerabilder werden nur auf dem Gerät ausgewertet und nicht gespeichert.");
         cameraHint.setPadding(0, 0, 0, dp(6));
         content.addView(cameraHint);
+        android.widget.RadioGroup sensitivities = new android.widget.RadioGroup(this);
+        String[] sensitivityNames = {"Fein – kleine Fingerbewegung", "Mittel", "Grob – ganze Hand"};
+        for (int i = 0; i < sensitivityNames.length; i++) {
+            android.widget.RadioButton choice = new android.widget.RadioButton(this);
+            choice.setId(View.generateViewId()); choice.setTag(i); choice.setTextSize(15);
+            choice.setText(sensitivityNames[i]);
+            sensitivities.addView(choice);
+            if (i == cameraSensitivity) sensitivities.check(choice.getId());
+        }
+        content.addView(sensitivities);
+        android.widget.CheckBox debugCheck = new android.widget.CheckBox(this);
+        debugCheck.setText("Erkennung anzeigen (Debug)"); debugCheck.setTextSize(15);
+        debugCheck.setChecked(cameraDebug);
+        content.addView(debugCheck);
+        TextView debugHint = new TextView(this); debugHint.setTextSize(13); debugHint.setTextColor(Color.rgb(110, 110, 110));
+        debugHint.setText("Zeigt unten rechts das Kamerabild als grobes Raster: rot sind bewegte Bereiche, der Punkt folgt der Bewegung. "
+                + "Die gestrichelten Linien zeigen, wie weit sie für eine Geste reichen muss.");
+        debugHint.setPadding(0, 0, 0, dp(6));
+        content.addView(debugHint);
         scroll.addView(content);
         new AlertDialog.Builder(this)
                 .setTitle("Einstellungen")
@@ -496,6 +529,9 @@ public class MainActivity extends Activity {
                     View checked = choices.findViewById(choices.getCheckedRadioButtonId());
                     setVoice(checked == null ? 0 : (Integer) checked.getTag());
                     setTwoSystemsMinimum(twoSystems.isChecked());
+                    View sensitivity = sensitivities.findViewById(sensitivities.getCheckedRadioButtonId());
+                    setCameraDetection(sensitivity == null ? CameraGestureDetector.SENSITIVITY_FINE : (Integer) sensitivity.getTag(),
+                            debugCheck.isChecked());
                     setCameraGestures(cameraSwipe.isChecked());
                 }).show();
     }
@@ -532,6 +568,13 @@ public class MainActivity extends Activity {
         if (enabled) showBanner("Handbewegung vor der Frontkamera blättert", false);
     }
 
+    private void setCameraDetection(int sensitivity, boolean debug) {
+        if (sensitivity == cameraSensitivity && debug == cameraDebug) return;
+        cameraSensitivity = sensitivity; cameraDebug = debug;
+        getPreferences(MODE_PRIVATE).edit().putInt("camera_sensitivity", sensitivity).putBoolean("camera_debug", debug).apply();
+        updateCameraGestures();
+    }
+
     @Override public void onRequestPermissionsResult(int request, String[] permissions, int[] results) {
         super.onRequestPermissionsResult(request, permissions, results);
         if (request != CAMERA_PERMISSION_REQUEST) return;
@@ -543,6 +586,8 @@ public class MainActivity extends Activity {
     private void updateCameraGestures() {
         boolean run = cameraGestures && resumed
                 && checkSelfPermission(android.Manifest.permission.CAMERA) == android.content.pm.PackageManager.PERMISSION_GRANTED;
+        gestureDebugView.setVisibility(run && cameraDebug ? View.VISIBLE : View.GONE);
+        if (!run || !cameraDebug) gestureDebugView.clear();
         if (!run) {
             if (cameraGestureDetector != null) cameraGestureDetector.stop();
             return;
@@ -556,7 +601,13 @@ public class MainActivity extends Activity {
             @Override public void onCameraError(String message) {
                 Toast.makeText(MainActivity.this, message, Toast.LENGTH_LONG).show();
             }
+
+            @Override public void onDebugFrame(CameraGestureDetector.DebugFrame frame) {
+                if (cameraDebug) gestureDebugView.show(frame);
+            }
         });
+        cameraGestureDetector.setSensitivity(cameraSensitivity);
+        cameraGestureDetector.setDebug(cameraDebug);
         cameraGestureDetector.start(displayRotationDegrees());
     }
 
