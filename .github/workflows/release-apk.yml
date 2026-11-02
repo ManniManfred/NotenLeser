@@ -4,6 +4,11 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version ohne v, z. B. 0.2.0 (Tag v<version> wird angelegt)'
+        required: true
 
 permissions:
   contents: write
@@ -24,7 +29,12 @@ jobs:
       - name: Determine version
         id: version
         run: |
-          NAME="${GITHUB_REF_NAME#v}"
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            NAME="${{ inputs.version }}"
+            NAME="${NAME#v}"
+          else
+            NAME="${GITHUB_REF_NAME#v}"
+          fi
           echo "name=$NAME" >> "$GITHUB_OUTPUT"
           # versionCode must increase with every release; use the run number.
           echo "code=$GITHUB_RUN_NUMBER" >> "$GITHUB_OUTPUT"
@@ -58,5 +68,7 @@ jobs:
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ steps.version.outputs.name }}
+          target_commitish: ${{ github.sha }}
           files: NotenLeser-${{ steps.version.outputs.name }}.apk
           generate_release_notes: true

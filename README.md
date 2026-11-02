@@ -43,6 +43,8 @@ git tag v0.2.0
 git push origin v0.2.0
 ```
 
+Alternativ den Workflow unter Actions → „Release APK“ → „Run workflow“ mit einer Version starten; er legt dann Tag und Release selbst an.
+
 Der Tag (ohne `v`) wird als `versionName` übernommen, die Laufnummer des Workflows als `versionCode`.
 
 Für eine signierte Release-APK folgende Repository-Secrets anlegen (Settings → Secrets and variables → Actions):
