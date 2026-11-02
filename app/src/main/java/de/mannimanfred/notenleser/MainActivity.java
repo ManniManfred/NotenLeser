@@ -122,6 +122,18 @@ public class MainActivity extends Activity {
     private boolean twoFingerHandled;
     private final Matrix imageMatrix = new Matrix();
     private ScaleGestureDetector scaleGestureDetector;
+    /** Plays MuseScore files; null for PDFs. */
+    private ScorePlayer player;
+    private PlaybackCursorView cursorView;
+    private TextView playButton;
+    /** Playback tempo in percent of the written tempo. */
+    private int playbackSpeed = 100;
+    private static final int[] PLAYBACK_SPEEDS = {50, 75, 100, 125};
+    private int cursorPage = -1, cursorSystem = -1;
+    /** Where the shown bitmap's parts come from: {page, source top, source bottom, destination top} in bitmap pixels. */
+    private final List<int[]> shownParts = new ArrayList<>();
+    private int shownWidth;
+    private final Runnable playbackTicker = this::updatePlaybackCursor;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -132,6 +144,7 @@ public class MainActivity extends Activity {
         cameraGestures = getPreferences(MODE_PRIVATE).getBoolean("camera_gestures", false);
         cameraSensitivity = getPreferences(MODE_PRIVATE).getInt("camera_sensitivity", CameraGestureDetector.SENSITIVITY_FINE);
         cameraDebug = getPreferences(MODE_PRIVATE).getBoolean("camera_debug", false);
+        playbackSpeed = getPreferences(MODE_PRIVATE).getInt("playback_speed", 100);
         buildUi();
         String savedFolder = getPreferences(MODE_PRIVATE).getString("folder_tree", null);
         if (savedFolder != null) {
@@ -267,6 +280,8 @@ public class MainActivity extends Activity {
             if (cameraGestureDetector != null) cameraGestureDetector.setDisplayRotation(displayRotationDegrees());
         });
         root.addView(scoreView, new FrameLayout.LayoutParams(-1, -1));
+        cursorView = new PlaybackCursorView(this);
+        root.addView(cursorView, new FrameLayout.LayoutParams(-1, -1));
 
         startPage = new LinearLayout(this);
         startPage.setOrientation(LinearLayout.VERTICAL);
@@ -338,6 +353,9 @@ public class MainActivity extends Activity {
         clearButton = button("×", this::clearManualSystems); clearButton.setContentDescription("Systeme dieser Seite löschen");
         TextView settings = button("⚙", this::showSettings); settings.setContentDescription("Einstellungen");
         settings.setTextSize(18);
+        playButton = button("▶", this::togglePlayback); playButton.setContentDescription("Abspielen");
+        playButton.setTextSize(16);
+        addTool(tools, playButton);
         addTool(tools, open); addTool(tools, detectionButton); addTool(tools, editButton); addTool(tools, settings);
         addTool(tools, previousButton); addTool(tools, nextButton);
         addTool(tools, undoEditButton); addTool(tools, undoButton); addTool(tools, clearButton);
@@ -375,6 +393,7 @@ public class MainActivity extends Activity {
         previousButton.setVisibility(editVisibility); nextButton.setVisibility(editVisibility);
         undoEditButton.setVisibility(editVisibility); undoButton.setVisibility(editVisibility);
         clearButton.setVisibility(editVisibility);
+        updatePlayButton();
     }
 
     private void showBanner(String text, boolean persistent) {
@@ -533,6 +552,20 @@ public class MainActivity extends Activity {
                 + "Die gestrichelten Linien zeigen, wie weit sie für eine Geste reichen muss.");
         debugHint.setPadding(0, 0, 0, dp(6));
         content.addView(debugHint);
+        TextView playbackHeading = new TextView(this); playbackHeading.setText("Wiedergabe (MuseScore)"); playbackHeading.setTextSize(16);
+        playbackHeading.setTextColor(Color.rgb(33, 33, 33));
+        playbackHeading.setTypeface(android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL));
+        playbackHeading.setPadding(0, dp(16), 0, 0);
+        content.addView(playbackHeading);
+        android.widget.RadioGroup speeds = new android.widget.RadioGroup(this);
+        for (int speed : PLAYBACK_SPEEDS) {
+            android.widget.RadioButton choice = new android.widget.RadioButton(this);
+            choice.setId(View.generateViewId()); choice.setTag(speed); choice.setTextSize(15);
+            choice.setText(speed == 100 ? "Originaltempo" : "Tempo " + speed + " %");
+            speeds.addView(choice);
+            if (speed == playbackSpeed) speeds.check(choice.getId());
+        }
+        content.addView(speeds);
         TextView versionInfo = new TextView(this); versionInfo.setTextSize(13); versionInfo.setTextColor(Color.rgb(110, 110, 110));
         versionInfo.setText(versionLabel());
         versionInfo.setPadding(0, dp(16), 0, dp(8));
@@ -550,7 +583,83 @@ public class MainActivity extends Activity {
                     setCameraDetection(sensitivity == null ? CameraGestureDetector.SENSITIVITY_FINE : (Integer) sensitivity.getTag(),
                             debugCheck.isChecked());
                     setCameraGestures(cameraSwipe.isChecked());
+                    View speed = speeds.findViewById(speeds.getCheckedRadioButtonId());
+                    if (speed != null) {
+                        playbackSpeed = (Integer) speed.getTag();
+                        getPreferences(MODE_PRIVATE).edit().putInt("playback_speed", playbackSpeed).apply();
+                    }
                 }).show();
+    }
+
+    private void updatePlayButton() {
+        if (playButton == null) return;
+        playButton.setVisibility(player != null && !editMode ? View.VISIBLE : View.GONE);
+        boolean playing = player != null && player.isPlaying();
+        playButton.setText(playing ? "■" : "▶");
+        playButton.setContentDescription(playing ? "Wiedergabe beenden" : "Abspielen");
+        setButtonAccent(playButton, playing);
+    }
+
+    /** Plays from the first system on screen, or stops a running playback. */
+    private void togglePlayback() {
+        if (player == null || !(renderer instanceof MuseScoreDocument)) return;
+        if (player.isPlaying()) { stopPlayback(); return; }
+        MuseScoreDocument score = (MuseScoreDocument) renderer;
+        int startTick = score.systemStartTick(pageIndex, autoDetection ? systemIndex : 0);
+        try {
+            player.start(this, Math.max(0, startTick), playbackSpeed / 100f, this::stopPlayback);
+        } catch (IOException | RuntimeException e) {
+            Toast.makeText(this, "Wiedergabe nicht möglich: " + describeCause(e), Toast.LENGTH_LONG).show();
+            return;
+        }
+        cursorPage = -1; cursorSystem = -1;
+        updatePlayButton();
+        hideControls();
+        cursorView.postOnAnimation(playbackTicker);
+    }
+
+    private void stopPlayback() {
+        if (player != null) player.stop();
+        if (cursorView != null) { cursorView.removeCallbacks(playbackTicker); cursorView.clear(); }
+        updatePlayButton();
+    }
+
+    /** Moves the cursor to the sounding position and turns to its system once playback reaches it. */
+    private void updatePlaybackCursor() {
+        if (player == null || !player.isPlaying() || !(renderer instanceof MuseScoreDocument)) { cursorView.clear(); return; }
+        cursorView.postOnAnimation(playbackTicker);
+        int tick = player.currentTick();
+        float[] cursor = tick < 0 ? null : ((MuseScoreDocument) renderer).cursorAt(tick);
+        if (cursor == null || editMode) { cursorView.clear(); return; }
+        int page = (int) cursor[0], system = (int) cursor[1];
+        if (page != cursorPage || system != cursorSystem) {
+            cursorPage = page; cursorSystem = system;
+            // The sounding system goes to the top of the screen so the following ones can be read ahead.
+            if (autoDetection ? page != pageIndex || system != systemIndex : page != pageIndex) {
+                pageIndex = page; systemIndex = autoDetection ? system : 0;
+                renderSystem();
+            }
+        }
+        float[] left = cursorToView(page, cursor[3], cursor[5], cursor[6]);
+        float[] right = cursorToView(page, cursor[4], cursor[5], cursor[6]);
+        float[] at = cursorToView(page, cursor[2], cursor[5], cursor[6]);
+        if (left == null || right == null || at == null) { cursorView.clear(); return; }
+        cursorView.show(left[0], right[0], at[0], at[1], at[2]);
+    }
+
+    /** Maps a page position (ratios) to view pixels as {x, top, bottom}, or null if that part is not shown. */
+    private float[] cursorToView(int page, float xRatio, float topRatio, float bottomRatio) {
+        if (shownWidth <= 0 || scoreView.getDrawable() == null) return null;
+        int pageHeight = pageBitmapHeight(page, shownWidth);
+        float x = xRatio * shownWidth, top = topRatio * pageHeight, bottom = bottomRatio * pageHeight;
+        float middle = (top + bottom) / 2;
+        for (int[] part : shownParts) {
+            if (part[0] != page || middle < part[1] || middle > part[2]) continue;
+            float[] points = {x, Math.max(part[1], top) - part[1] + part[3], 0, Math.min(part[2], bottom) - part[1] + part[3]};
+            scoreView.getImageMatrix().mapPoints(points);
+            return new float[]{points[0], points[1], points[3]};
+        }
+        return null;
     }
 
     private static String voiceName(int voice) { return voice + ". Stimme"; }
@@ -885,7 +994,10 @@ public class MainActivity extends Activity {
                     loadedRenderer.close();
                     return;
                 }
+                stopPlayback();
                 renderer = loadedRenderer;
+                player = loadedRenderer instanceof MuseScoreDocument ? new ScorePlayer(((MuseScoreDocument) loadedRenderer).score()) : null;
+                updatePlayButton();
                 displayName = loadedName;
                 pdfUri = uri; pageIndex = startAtLastPage ? loadedRenderer.getPageCount() - 1 : 0; systemIndex = 0;
                 pageSystems.clear(); pageStaffRatios.clear();
@@ -935,6 +1047,8 @@ public class MainActivity extends Activity {
     }
 
     private void closePdf() {
+        stopPlayback();
+        player = null;
         if (renderer != null) { renderer.close(); renderer = null; }
     }
 
@@ -961,6 +1075,7 @@ public class MainActivity extends Activity {
         }
         editMode = !editMode;
         autoDetection = !editMode;
+        if (editMode) stopPlayback();
         zoom = 1f; panX = 0f; panY = 0f;
         updateToolButtons();
         systemIndex = 0;
@@ -1414,6 +1529,8 @@ public class MainActivity extends Activity {
                 visibleSystems = new ArrayList<>();
                 refreshInfo();
                 Bitmap page = renderPageBitmap(pageIndex, width);
+                shownParts.clear(); shownWidth = width;
+                shownParts.add(new int[]{pageIndex, 0, page.getHeight(), 0});
                 if (editMode) drawManualOverlay(page, pageIndex);
                 else drawPageVoiceHighlight(page, pageIndex);
                 scoreView.setImageBitmap(page);
@@ -1554,6 +1671,7 @@ public class MainActivity extends Activity {
         Paint dividerPaint = new Paint(Paint.ANTI_ALIAS_FLAG); dividerPaint.setColor(Color.argb(145, 75, 83, 91));
         dividerPaint.setStrokeWidth(Math.max(1f, dp(1) / displayScale));
         Bitmap pageBitmap = null; int renderedPage = -1, y = 0;
+        shownParts.clear(); shownWidth = width;
         try {
             for (int i = 0; i < systems.size(); i++) {
                 SystemRef system = systems.get(i);
@@ -1565,6 +1683,7 @@ public class MainActivity extends Activity {
                 Rect source = new Rect(0, system.top, width, system.bottom);
                 Rect destination = new Rect(0, y, width, y + systemHeight);
                 canvas.drawBitmap(pageBitmap, source, destination, imagePaint);
+                shownParts.add(new int[]{system.page, system.top, system.bottom, y});
                 int[] staff = voiceStaff(system.page, system.top, system.bottom, width);
                 if (staff != null) drawVoiceHighlight(canvas, staff, y - system.top, width, y, y + systemHeight);
                 String label = (system.page + 1) + "·" + (system.index + 1);
@@ -1686,7 +1805,7 @@ public class MainActivity extends Activity {
     }
 
     @Override protected void onResume() { super.onResume(); resumed = true; updateCameraGestures(); }
-    @Override protected void onPause() { resumed = false; updateCameraGestures(); super.onPause(); }
+    @Override protected void onPause() { resumed = false; stopPlayback(); updateCameraGestures(); super.onPause(); }
     @Override public void onWindowFocusChanged(boolean hasFocus) { super.onWindowFocusChanged(hasFocus); if (hasFocus) immersive(); }
     @Override protected void onDestroy() { openRequestId++; uiHandler.removeCallbacks(hideControlsTask); uiHandler.removeCallbacks(hideBannerTask); sidecarExecutor.shutdown(); closePdf(); if (cameraGestureDetector != null) cameraGestureDetector.shutdown(); super.onDestroy(); }
 }

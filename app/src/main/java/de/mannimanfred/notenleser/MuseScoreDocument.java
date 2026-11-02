@@ -14,12 +14,13 @@ import java.io.IOException;
 final class MuseScoreDocument implements ScoreDocument {
     private static Typeface musicFont;
     private final ScoreEngraver engraver;
+    private final MusicModel.Score score;
 
     MuseScoreDocument(Context context, byte[] data) throws IOException {
         synchronized (MuseScoreDocument.class) {
             if (musicFont == null) musicFont = Typeface.createFromAsset(context.getAssets(), "fonts/Leland.otf");
         }
-        MusicModel.Score score = MuseScoreReader.read(data);
+        score = MuseScoreReader.read(data);
         if (score.measures.isEmpty()) throw new IOException("Die MuseScore-Datei enthält keine Takte");
         engraver = new ScoreEngraver(score, new CanvasPainter(null, 1f));
     }
@@ -41,6 +42,13 @@ final class MuseScoreDocument implements ScoreDocument {
     @Override public float[] staffRatios(int page) { return engraver.staffRatios(page); }
 
     @Override public void close() { }
+
+    MusicModel.Score score() { return score; }
+
+    /** See {@link ScoreEngraver#cursorAt}. */
+    float[] cursorAt(int tick) { return engraver.cursorAt(tick); }
+
+    int systemStartTick(int page, int system) { return engraver.systemStartTick(page, system); }
 
     /** Draws in staff spaces scaled by k pixels per staff space. */
     private static final class CanvasPainter implements ScorePainter {

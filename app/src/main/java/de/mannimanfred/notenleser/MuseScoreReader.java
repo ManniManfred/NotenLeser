@@ -123,6 +123,9 @@ final class MuseScoreReader {
                 Staff staff = new Staff(); StaffContext context = new StaffContext();
                 staff.part = partIndex; staff.name = staffInPart == 1 ? longName : ""; staff.shortName = staffInPart == 1 ? shortName : "";
                 if (instrument != null) {
+                    Element channel = child(instrument, "Channel");
+                    Element program = channel == null ? null : child(channel, "program");
+                    if (program != null) staff.program = Math.max(0, Math.min(127, parseInt(program.getAttribute("value"), 0)));
                     context.transposeChromatic = intValue(child(instrument, "transposeChromatic"), 0);
                     context.transposeDiatonic = intValue(child(instrument, "transposeDiatonic"), 0);
                     for (Element clef : children(instrument, "clef")) {
@@ -445,6 +448,7 @@ final class MuseScoreReader {
         Note note = new Note();
         int pitch = intValue(child(element, "pitch"), -1);
         if (pitch < 0) return null;
+        note.soundPitch = pitch;
         int tpc = intValue(child(element, "tpc"), 14);
         int tpc2 = intValue(child(element, "tpc2"), Integer.MIN_VALUE);
         if (context.transposed()) {
@@ -521,6 +525,11 @@ final class MuseScoreReader {
     }
 
     private void readAnnotation(Element element, int tick, Measure measure, StaffMeasure staffMeasure) {
+        if (element.getTagName().equals("Tempo")) {
+            // Stored as quarter notes per second; hidden markings still set the playback tempo.
+            float quarterPerSecond = floatValue(child(element, "tempo"), 0f);
+            if (quarterPerSecond > 0) score.tempos.put(tick, quarterPerSecond * 60f);
+        }
         if (intValue(child(element, "visible"), 1) == 0) return;
         String tag = element.getTagName();
         Element textElement = child(element, "text");

@@ -16,6 +16,8 @@ final class MusicModel {
         final List<Staff> staves = new ArrayList<>();
         final List<Measure> measures = new ArrayList<>();
         final List<Spanner> spanners = new ArrayList<>();
+        /** Tempo changes as tick to quarter notes per minute, including hidden tempo markings. */
+        final java.util.TreeMap<Integer, Float> tempos = new java.util.TreeMap<>();
     }
 
     static final class Staff {
@@ -25,6 +27,8 @@ final class MusicModel {
         int bracket, bracketSpan;
         boolean barLineToNext;
         String clef = "G";
+        /** General MIDI program of the instrument (0 = piano). */
+        int program;
     }
 
     static final class Measure {
@@ -78,6 +82,8 @@ final class MusicModel {
 
     static final class Note {
         int pitch, tpc;
+        /** Sounding (concert) MIDI pitch, used for playback. */
+        int soundPitch;
         boolean tieStart, tieEnd;
         Note tieTo;
         String head;

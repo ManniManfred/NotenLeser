@@ -884,6 +884,35 @@ final class ScoreEngraver {
         return ratios;
     }
 
+    /**
+     * Playback cursor for a tick as {page, system index on the page, x, measure left, measure right, top, bottom};
+     * x values are ratios of the page width, top and bottom ratios of the page height. Null outside the score.
+     */
+    float[] cursorAt(int tick) {
+        for (int p = 0; p < pages.size(); p++) {
+            PageLayout page = pages.get(p);
+            for (int i = 0; i < page.systems.size(); i++) {
+                SystemLayout system = page.systems.get(i);
+                if (tick < system.startTick() || tick >= system.endTick()) continue;
+                MeasurePlacement placement = system.placement(tick);
+                float y = page.y.get(i);
+                float top = y + system.staffY[0] - 1.5f, bottom = y + system.staffY[staffCount - 1] + 5.5f;
+                float x = system.xAt(tick, false);
+                float left = placement == null ? x : placement.x, right = placement == null ? x : placement.end();
+                return new float[]{p, i, x / pageWidth, left / pageWidth, right / pageWidth,
+                        Math.max(0, top / pageHeight), Math.min(1, bottom / pageHeight)};
+            }
+        }
+        return null;
+    }
+
+    /** First tick of a system, or -1 if the page has no such system. */
+    int systemStartTick(int pageIndex, int systemIndex) {
+        if (pageIndex < 0 || pageIndex >= pages.size()) return -1;
+        PageLayout page = pages.get(pageIndex);
+        return systemIndex < 0 || systemIndex >= page.systems.size() ? -1 : page.systems.get(systemIndex).startTick();
+    }
+
     void drawPage(ScorePainter painter, int pageIndex) {
         PageLayout page = pages.get(pageIndex);
         if (page.title) {
