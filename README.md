@@ -33,3 +33,23 @@ Die automatische Erkennung (`SystemDetector`) sucht Notenzeilen abschnittsweise 
 Der Import (`MuseScoreReader`) liest das Partitur-XML und die Stildatei aus dem `.mscz`-Archiv. Der Notensatz (`ScoreEngraver`) setzt Schlüssel, Tonart- und Taktwechsel, Noten mit Hälsen, Fähnchen und automatischer Balkung, Punktierungen, Vorzeichen (nach Tonart und Taktregeln), Pausen und Ganztaktpausen, Haltebögen, Legatobögen, N-tolen, Vorschlagsnoten, Artikulationen, Fermaten, Dynamik und Gabeln, Wiederholungen und Volten, Tempo-, Spiel- und Probenzeichen, Akkordsymbole, Liedtext sowie mehrere Stimmen und Systeme mit Klammern. Nicht dargestellt werden u. a. Tabulatur, Glissandi, Oktavierungslinien, Pedal, Tremoli, Arpeggien und Mehrtaktpausen.
 
 Die Notenschrift Leland stammt aus dem MuseScore-Projekt und steht unter der SIL Open Font License 1.1 (`app/src/main/assets/fonts/Leland-LICENSE.txt`).
+
+## APK automatisch bauen (GitHub Actions)
+
+Beim Pushen eines Tags, der mit `v` beginnt, baut der Workflow `.github/workflows/release-apk.yml` die APK und hängt sie an ein GitHub-Release an:
+
+```sh
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+Der Tag (ohne `v`) wird als `versionName` übernommen, die Laufnummer des Workflows als `versionCode`.
+
+Für eine signierte Release-APK folgende Repository-Secrets anlegen (Settings → Secrets and variables → Actions):
+
+- `ANDROID_KEYSTORE_BASE64` – Keystore-Datei als Base64 (`base64 -w0 release.keystore`)
+- `ANDROID_KEYSTORE_PASSWORD` – Passwort des Keystores
+- `ANDROID_KEY_ALIAS` – Alias des Schlüssels
+- `ANDROID_KEY_PASSWORD` – Passwort des Schlüssels
+
+Einen Keystore erzeugt z. B. `keytool -genkeypair -v -keystore release.keystore -alias notenleser -keyalg RSA -keysize 4096 -validity 10000`. Ohne diese Secrets entsteht eine Debug-signierte APK. Sie lässt sich installieren, aber weil jeder Build einen anderen Debug-Schlüssel hat, kann sie eine frühere Version nicht ersetzen (vorher deinstallieren).

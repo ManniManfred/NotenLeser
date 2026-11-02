@@ -1,5 +1,9 @@
 plugins { id 'com.android.application' }
 
+// Optional release signing, configured via environment variables (used by the
+// GitHub Actions release workflow). Without them the release APK stays unsigned.
+def releaseKeystore = System.getenv('ANDROID_KEYSTORE_FILE')
+
 android {
     namespace 'de.mannimanfred.notenleser'
     compileSdk 36
@@ -7,7 +11,24 @@ android {
         applicationId 'de.mannimanfred.notenleser'
         minSdk 23
         targetSdk 36
-        versionCode 1
-        versionName '0.1.0'
+        versionCode((project.findProperty('versionCode') ?: '1') as int)
+        versionName project.findProperty('versionName') ?: '0.1.0'
+    }
+    signingConfigs {
+        if (releaseKeystore) {
+            release {
+                storeFile file(releaseKeystore)
+                storePassword System.getenv('ANDROID_KEYSTORE_PASSWORD')
+                keyAlias System.getenv('ANDROID_KEY_ALIAS')
+                keyPassword System.getenv('ANDROID_KEY_PASSWORD')
+            }
+        }
+    }
+    buildTypes {
+        release {
+            if (releaseKeystore) {
+                signingConfig signingConfigs.release
+            }
+        }
     }
 }
