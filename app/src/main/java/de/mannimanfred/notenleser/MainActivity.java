@@ -305,6 +305,11 @@ public class MainActivity extends Activity {
         gestures.setTextSize(13); gestures.setTextColor(Color.rgb(128, 137, 147)); gestures.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams gestureParams = new LinearLayout.LayoutParams(-2, -2);
         gestureParams.topMargin = dp(32); startPage.addView(gestures, gestureParams);
+        TextView startVersion = new TextView(this);
+        startVersion.setText(versionLabel());
+        startVersion.setTextSize(12); startVersion.setTextColor(Color.rgb(98, 106, 115)); startVersion.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams versionParams = new LinearLayout.LayoutParams(-2, -2);
+        versionParams.topMargin = dp(12); startPage.addView(startVersion, versionParams);
         FrameLayout.LayoutParams startParams = new FrameLayout.LayoutParams(-1, -1);
         root.addView(startPage, startParams);
 
@@ -453,6 +458,14 @@ public class MainActivity extends Activity {
                 }).show();
     }
 
+    private String versionLabel() {
+        try {
+            return "Version " + getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+        } catch (android.content.pm.PackageManager.NameNotFoundException e) {
+            return "Version unbekannt";
+        }
+    }
+
     private void showSettings() {
         LinearLayout content = new LinearLayout(this); content.setOrientation(LinearLayout.VERTICAL);
         content.setPadding(dp(24), dp(8), dp(24), 0);
@@ -520,6 +533,10 @@ public class MainActivity extends Activity {
                 + "Die gestrichelten Linien zeigen, wie weit sie für eine Geste reichen muss.");
         debugHint.setPadding(0, 0, 0, dp(6));
         content.addView(debugHint);
+        TextView versionInfo = new TextView(this); versionInfo.setTextSize(13); versionInfo.setTextColor(Color.rgb(110, 110, 110));
+        versionInfo.setText(versionLabel());
+        versionInfo.setPadding(0, dp(16), 0, dp(8));
+        content.addView(versionInfo);
         scroll.addView(content);
         new AlertDialog.Builder(this)
                 .setTitle("Einstellungen")
