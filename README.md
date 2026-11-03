@@ -1,5 +1,7 @@
 # NotenLeser (Android)
 
+> Eine Web-Version als Nextcloud-App liegt im Ordner [`nextcloud/`](nextcloud/README.md).
+
 Native Android-App zum Lesen von Noten (PDF und MuseScore) im Vollbild. Die Datei wird über den Android-Dateiauswahldialog geöffnet. Wähle dort den Nextcloud-Speicherort oder einen lokal synchronisierten Ordner. Android merkt sich die Dateiberechtigung, sodass die zuletzt geöffnete Datei beim nächsten Start wieder geladen werden kann.
 
 ## Funktionen

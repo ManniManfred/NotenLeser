@@ -1,0 +1,21 @@
+/* Header-less reader: the Nextcloud header disappears and the reader fills the screen up to the edges. */
+:root {
+	--header-height: 0px !important;
+	--body-container-margin: 0px !important;
+	--body-container-radius: 0px !important;
+	--body-height: 100dvh !important;
+}
+html, body { background: #000 !important; overflow: hidden; }
+#header, #skip-actions, .header-start, .header-end, #app-navigation { display: none !important; }
+#content.app-notenleser, #content-vue.app-notenleser {
+	position: fixed !important;
+	inset: 0 !important;
+	width: 100vw !important;
+	height: 100vh !important;
+	height: 100dvh !important;
+	margin: 0 !important;
+	padding: 0 !important;
+	border-radius: 0 !important;
+	max-width: none !important;
+}
+.nl-root { min-height: 0; }
