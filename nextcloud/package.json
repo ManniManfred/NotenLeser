@@ -1,0 +1,27 @@
+{
+  "name": "notenleser-nextcloud",
+  "version": "0.1.0",
+  "private": true,
+  "description": "NotenLeser as a Nextcloud app",
+  "license": "AGPL-3.0-or-later",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "watch": "node scripts/build.mjs --watch",
+    "test": "node --test tests/*.test.js",
+    "dev": "node scripts/build.mjs && node scripts/dev-server.mjs",
+    "package": "node scripts/build.mjs && sh scripts/package.sh"
+  },
+  "dependencies": {
+    "@nextcloud/auth": "^2.6.0",
+    "@nextcloud/files": "^4.1.1",
+    "@nextcloud/initial-state": "^3.0.0",
+    "@nextcloud/router": "^3.2.0",
+    "fflate": "^0.8.3",
+    "pdfjs-dist": "^6.5.438"
+  },
+  "devDependencies": {
+    "@xmldom/xmldom": "^0.9.12",
+    "esbuild": "^0.28.2"
+  }
+}

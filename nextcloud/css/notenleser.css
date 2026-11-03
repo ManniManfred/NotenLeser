@@ -1,0 +1,162 @@
+/* NotenLeser reader. Dark overlays over a black stage, like the Android app. */
+#content.app-notenleser { overflow: hidden; }
+
+.nl-root {
+	--nl-accent: #c49848;
+	--nl-accent-strong: #ae8439;
+	--nl-panel: rgba(24, 28, 34, 0.9);
+	--nl-button: #343b45;
+	--nl-text: #fff;
+	--nl-muted: #aab2bc;
+	position: relative;
+	width: 100%;
+	height: 100%;
+	min-height: 320px;
+	overflow: hidden;
+	background: #000;
+	color: var(--nl-text);
+	font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+	user-select: none;
+	-webkit-user-select: none;
+}
+.nl-root:fullscreen { width: 100vw; height: 100vh; }
+.nl-root [hidden] { display: none !important; }
+
+.nl-score {
+	position: absolute; inset: 0;
+	width: 100%; height: 100%;
+	touch-action: none;
+	display: block;
+}
+
+.nl-cursor-measure, .nl-cursor-line { position: absolute; pointer-events: none; }
+.nl-cursor-measure { background: rgba(20, 112, 196, 0.16); }
+.nl-cursor-line { width: 3px; background: rgba(20, 112, 196, 0.75); }
+
+.nl-panel {
+	background: var(--nl-panel);
+	border: 1px solid rgba(255, 255, 255, 0.14);
+	border-radius: 22px;
+	box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+	backdrop-filter: blur(6px);
+}
+
+.nl-overlay {
+	position: absolute; top: 12px; left: 12px;
+	max-width: calc(100% - 24px);
+	padding: 12px 14px;
+	transition: opacity 350ms;
+	z-index: 2;
+}
+.nl-overlay.nl-faded { opacity: 0; pointer-events: none; }
+.nl-title { font-size: 16px; font-weight: 600; padding: 0 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 640px; }
+.nl-info { font-size: 12px; color: var(--nl-muted); padding: 2px 4px 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 640px; }
+.nl-tools { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+
+.nl-root .nl-button {
+	min-height: 40px; min-width: 44px;
+	margin: 0;
+	padding: 8px 14px;
+	border-radius: 20px;
+	border: 1px solid rgba(255, 255, 255, 0.16);
+	background: var(--nl-button);
+	color: #fff;
+	font-size: 14px; font-weight: 500;
+	cursor: pointer;
+	line-height: 1.2;
+}
+.nl-root .nl-button:hover { background: #414a56; }
+.nl-root .nl-button:focus-visible { outline: 2px solid var(--nl-accent); outline-offset: 2px; }
+.nl-root .nl-button.nl-big { font-size: 18px; }
+.nl-root .nl-button.nl-accent, .nl-root .nl-button.nl-primary { background: var(--nl-accent); color: #1c160c; border-color: transparent; }
+
+.nl-start {
+	position: absolute; inset: 0;
+	display: flex; flex-direction: column; align-items: center; justify-content: center;
+	padding: 28px;
+	background: #14181d;
+	text-align: center;
+	overflow: auto;
+}
+.nl-emblem { font-size: 54px; color: #ddbe74; line-height: 1; }
+.nl-start h2 { font-size: 30px; font-weight: 600; color: #fff; margin: 8px 0 0; }
+.nl-intro { font-size: 16px; color: #bec5cd; max-width: 380px; margin: 10px 0 28px; }
+.nl-root .nl-start-action {
+	width: 260px; min-height: 54px; margin: 6px 0;
+	border-radius: 14px; font-size: 16px; font-weight: 500; cursor: pointer;
+	white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 16px;
+}
+.nl-root .nl-start-action.nl-primary { background: var(--nl-accent-strong); color: #fff; border: none; }
+.nl-root .nl-start-action.nl-secondary { background: #2c343d; color: #fff; border: 1px solid #5c6772; }
+.nl-root .nl-link { background: none; border: none; color: #ddbe74; font-size: 15px; margin-top: 8px; min-height: 44px; cursor: pointer; }
+.nl-hint { font-size: 13px; color: #808993; margin-top: 32px; }
+.nl-version { font-size: 12px; color: #626a73; margin-top: 12px; }
+
+.nl-banner {
+	position: absolute; left: 50%; top: 50%;
+	transform: translate(-50%, -50%);
+	max-width: min(420px, calc(100% - 32px));
+	padding: 12px 20px;
+	font-size: 15px; font-weight: 500; text-align: center; white-space: pre-line;
+	opacity: 0; transition: opacity 300ms; pointer-events: none; z-index: 3;
+}
+.nl-banner.nl-visible { opacity: 1; transition-duration: 150ms; }
+
+.nl-toast {
+	position: absolute; left: 50%; bottom: 24px; transform: translateX(-50%);
+	max-width: calc(100% - 32px);
+	padding: 10px 18px; border-radius: 20px;
+	background: rgba(50, 54, 60, 0.95); color: #fff; font-size: 14px; text-align: center;
+	opacity: 0; transition: opacity 250ms; pointer-events: none; z-index: 5;
+}
+.nl-toast.nl-visible { opacity: 1; }
+
+.nl-debug { position: absolute; right: 12px; bottom: 12px; width: 210px; height: 230px; border-radius: 14px; pointer-events: none; z-index: 2; }
+
+.nl-backdrop {
+	position: absolute; inset: 0; z-index: 10;
+	background: rgba(0, 0, 0, 0.55);
+	display: flex; align-items: center; justify-content: center;
+	padding: 16px;
+}
+.nl-dialog {
+	width: min(520px, 100%); max-height: 100%;
+	display: flex; flex-direction: column;
+	background: #fff; color: #222;
+	border-radius: 16px; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
+	user-select: text;
+}
+.nl-dialog h3 { margin: 0; padding: 18px 24px 8px; font-size: 20px; font-weight: 600; color: #111; }
+.nl-dialog-content { overflow: auto; padding: 0 24px; flex: 1; min-height: 0; }
+.nl-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 24px 18px; }
+.nl-dialog .nl-button { background: #eef0f2; color: #222; border-color: #d5d9de; }
+.nl-dialog .nl-button:hover { background: #e2e6ea; }
+.nl-dialog .nl-button.nl-primary { background: var(--nl-accent); color: #1c160c; }
+
+.nl-settings h4 { font-size: 16px; font-weight: 600; margin: 16px 0 2px; color: #212121; }
+.nl-settings h4:first-child { margin-top: 4px; }
+.nl-hint-text { font-size: 13px; color: #6e6e6e; margin: 2px 0 6px; }
+.nl-options { display: flex; flex-direction: column; }
+.nl-option { display: flex; align-items: center; gap: 10px; font-size: 15px; min-height: 36px; cursor: pointer; color: #222; }
+.nl-option input { width: 18px; height: 18px; margin: 0; accent-color: var(--nl-accent-strong); cursor: pointer; }
+.nl-settings .nl-version { color: #6e6e6e; margin: 16px 0 8px; }
+
+.nl-crumbs { font-size: 14px; color: #666; padding: 4px 0 8px; display: flex; flex-wrap: wrap; align-items: center; gap: 2px; }
+.nl-root .nl-crumb { background: none; border: none; color: #8a6420; font-size: 14px; padding: 4px 6px; min-height: 32px; cursor: pointer; border-radius: 6px; margin: 0; }
+.nl-root .nl-crumb:hover { background: #f3ede2; }
+.nl-files { list-style: none; margin: 0; padding: 0; min-height: 200px; }
+.nl-root .nl-file {
+	width: 100%; display: flex; align-items: center; gap: 12px;
+	padding: 10px 8px; min-height: 44px; margin: 0;
+	background: none; border: none; border-bottom: 1px solid #eee; border-radius: 0;
+	text-align: left; font-size: 15px; color: #222; cursor: pointer;
+}
+.nl-root .nl-file:hover { background: #f6f3ee; }
+.nl-file-icon { width: 22px; text-align: center; }
+.nl-file-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nl-files-note { padding: 16px 8px; color: #777; font-size: 14px; }
+
+@media (max-width: 480px) {
+	.nl-overlay { top: 8px; left: 8px; max-width: calc(100% - 16px); padding: 10px; }
+	.nl-root .nl-button { padding: 8px 11px; }
+}
