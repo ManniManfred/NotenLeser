@@ -1,0 +1,31 @@
+<?xml version="1.0"?>
+<info xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:noNamespaceSchemaLocation="https://apps.nextcloud.com/schema/apps/info.xsd">
+	<id>notenleser</id>
+	<name>NotenLeser</name>
+	<summary>Noten (PDF und MuseScore) im Vollbild lesen, systemweise blättern und abspielen</summary>
+	<description><![CDATA[NotenLeser zeigt Noten aus deinen Nextcloud-Dateien im Vollbild an.
+
+- PDF-Noten: Notensysteme werden automatisch erkannt, geblättert wird System für System.
+- MuseScore-Dateien (.mscz, .mscx) werden direkt im Browser gesetzt und lassen sich abspielen.
+- Eigene Stimme hervorheben, mindestens zwei Systeme anzeigen, Blätterpedale (Bluetooth-Tastatur), Wischgesten und Blättern per Handbewegung vor der Kamera.
+- Manuell markierte Systeme werden als `.systems.json` neben der Notendatei gespeichert – kompatibel mit der Android-App.]]></description>
+	<version>0.1.0</version>
+	<licence>agpl</licence>
+	<author mail="manfred.rosskamp@gmx.de">Manfred Rosskamp</author>
+	<namespace>NotenLeser</namespace>
+	<category>multimedia</category>
+	<category>files</category>
+	<bugs>https://github.com/ManniManfred/NotenLeser/issues</bugs>
+	<repository type="git">https://github.com/ManniManfred/NotenLeser</repository>
+	<dependencies>
+		<nextcloud min-version="30" max-version="33"/>
+	</dependencies>
+	<navigations>
+		<navigation>
+			<name>NotenLeser</name>
+			<route>notenleser.page.index</route>
+			<icon>app.svg</icon>
+		</navigation>
+	</navigations>
+</info>
