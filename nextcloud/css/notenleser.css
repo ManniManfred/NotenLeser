@@ -143,6 +143,7 @@
 .nl-option { display: flex; align-items: center; gap: 10px; font-size: 15px; min-height: 36px; cursor: pointer; color: #222; }
 .nl-option input { width: 18px; height: 18px; margin: 0; accent-color: var(--nl-accent-strong); cursor: pointer; }
 .nl-settings .nl-version { color: #6e6e6e; margin: 16px 0 8px; }
+.nl-settings .nl-version a { color: inherit; text-decoration: underline; }
 
 .nl-crumbs { font-size: 14px; color: #666; padding: 4px 0 8px; display: flex; flex-wrap: wrap; align-items: center; gap: 2px; }
 .nl-root .nl-crumb { background: none; border: none; color: #8a6420; font-size: 14px; padding: 4px 6px; min-height: 32px; cursor: pointer; border-radius: 6px; margin: 0; }

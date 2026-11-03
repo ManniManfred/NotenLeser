@@ -17,6 +17,9 @@ on:
     paths:
       - 'nextcloud/**'
       - '.github/workflows/pages.yml'
+      - 'LICENSE'
+      - 'LICENSES/**'
+      - 'THIRD-PARTY-NOTICES.md'
   workflow_dispatch:
 
 permissions:

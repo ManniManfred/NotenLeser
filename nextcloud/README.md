@@ -20,7 +20,7 @@ Die Kamerabilder werden nur im Browser zu einem groben Helligkeitsraster verrech
 
 ## Web-App ohne Nextcloud (GitHub Pages)
 
-Dieselbe Oberfläche läuft auch als reine Web-App ohne Server, z. B. auf GitHub Pages (siehe „Veröffentlichen“).
+Dieselbe Oberfläche läuft auch als reine Web-App ohne Server: **https://mannimanfred.github.io/NotenLeser/**
 
 - „Noten öffnen“ wählt eine oder mehrere Dateien vom Gerät (auch auf dem iPhone); die gewählten Dateien bilden die Mappe zum Wischen nach oben/unten.
 - „Ordner öffnen“ öffnet einen ganzen Notenordner. In Chrome und Edge bleibt der Ordner gespeichert („Weiterlesen“ nach dem Neustart), und markierte Systeme werden als `.systems.json` direkt in den Ordner geschrieben – kompatibel mit Android- und Nextcloud-Version. In anderen Browsern werden Markierungen im Browser gespeichert.
@@ -29,23 +29,9 @@ Dieselbe Oberfläche läuft auch als reine Web-App ohne Server, z. B. auf GitHub
 
 ### Veröffentlichen
 
-Der Workflow `.github/workflows/pages.yml` baut die Seite bei jedem Push auf `main`, der `nextcloud/` ändert (oder manuell über *Actions → GitHub Pages (Web-App) → Run workflow*). Lokal bauen: `npm run build:pages` (Ergebnis in `dist-pages/`). Die App nutzt nur relative Pfade und läuft unter jeder Adresse.
+Der Workflow `.github/workflows/pages.yml` baut die Seite bei jedem Push auf `main`, der `nextcloud/` ändert, und veröffentlicht sie auf GitHub Pages (manuell: *Actions → GitHub Pages (Web-App) → Run workflow*). Einmalig nötig: im Repository unter *Settings → Pages* als Quelle „GitHub Actions“ wählen. Lokal bauen: `npm run build:pages` (Ergebnis in `dist-pages/`). Die App nutzt nur relative Pfade und läuft unter jeder Adresse; `LICENSE` und `THIRD-PARTY-NOTICES.md` werden mit veröffentlicht.
 
-GitHub Pages gibt es mit GitHub Free nur für öffentliche Repositories. Damit dieses Repository privat bleiben kann, schiebt der Workflow nur die gebauten Dateien in ein eigenes öffentliches Repository. Einmalig einrichten:
-
-1. Neues **öffentliches** Repository anlegen, z. B. `ManniManfred/notenleser-web` (leer, ohne README). Die Web-App liegt dann unter `https://mannimanfred.github.io/notenleser-web/`. Heißt es `mannimanfred.github.io`, liegt sie direkt unter `https://mannimanfred.github.io/`.
-2. Token erstellen: *GitHub → Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token*
-   - Repository access: *Only select repositories* → nur das neue Repository
-   - Permissions: *Contents: Read and write* und *Pages: Read and write*
-   - Ablaufdatum nach Wunsch (danach Token erneuern und Secret ersetzen).
-3. In **diesem** Repository unter *Settings → Secrets and variables → Actions*:
-   - Tab *Secrets*: `PAGES_DEPLOY_TOKEN` = der Token
-   - Tab *Variables*: `PAGES_REPO` = `ManniManfred/notenleser-web`
-4. Workflow einmal manuell starten. Er schiebt die Seite in den Branch `gh-pages` des öffentlichen Repositorys und schaltet dort GitHub Pages ein; die Adresse steht in der Zusammenfassung des Laufs. Klappt das Einschalten nicht, im öffentlichen Repository *Settings → Pages → Deploy from a branch → `gh-pages` / (root)* wählen.
-
-Öffentlich ist damit nur das gebaute, minimierte JavaScript samt Lizenzhinweisen (`*.LEGAL.txt`) und den Beispielnoten, nicht der Quellcode.
-
-Weitere Variablen: `PAGES_BRANCH` (anderer Ziel-Branch statt `gh-pages`), `PAGES_CNAME` (eigene Domain). Ohne `PAGES_REPO` veröffentlicht der Workflow über GitHub Pages dieses Repositorys (öffentliches Repository oder bezahlter Plan; *Settings → Pages → Source: GitHub Actions*).
+Optionale Repository-Variablen: `PAGES_CNAME` für eine eigene Domain. Mit `PAGES_REPO` (`owner/name`) und dem Secret `PAGES_DEPLOY_TOKEN` (Fine-grained Token für das Ziel-Repository mit *Contents* und *Pages: Read and write*) schiebt der Workflow die gebauten Dateien stattdessen in den Branch `gh-pages` (oder `PAGES_BRANCH`) eines anderen Repositorys und schaltet dort Pages ein – nützlich, falls dieses Repository einmal privat sein soll.
 
 ## Installation
 
@@ -80,4 +66,4 @@ node scripts/dev-server.mjs /pfad/zu/noten 8085   # mit eigenem Notenordner
 
 Der Reader bekommt Dateizugriff (`list`, `read`, `readText`, `write`) und Einstellungsspeicher (`load`, `save`) von außen. Für eine Desktop-Version muss nur diese Anbindung neu geschrieben werden.
 
-Die Notenschrift Leland stammt aus dem MuseScore-Projekt und steht unter der SIL Open Font License 1.1 (`fonts/Leland-LICENSE.txt`).
+Lizenz: AGPL-3.0-or-later (siehe [`LICENSE`](../LICENSE)). Die Notenschrift Leland stammt aus dem MuseScore-Projekt und steht unter der SIL Open Font License 1.1 (`fonts/Leland-LICENSE.txt`); weitere Bestandteile Dritter in [`THIRD-PARTY-NOTICES.md`](../THIRD-PARTY-NOTICES.md).

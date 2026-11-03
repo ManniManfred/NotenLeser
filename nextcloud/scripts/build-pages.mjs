@@ -29,6 +29,7 @@ for (const icon of ['icon-180.png', 'icon-192.png', 'icon-512.png']) cpSync(join
 for (const file of ['index.html', 'manifest.webmanifest']) cpSync(join(root, 'pages', file), join(out, file))
 cpSync(join(root, 'pages/demo'), join(out, 'demo'), { recursive: true })
 writeFileSync(join(out, '.nojekyll'), '')
+for (const file of ['LICENSE', 'THIRD-PARTY-NOTICES.md', 'LICENSES']) cpSync(join(root, '..', file), join(out, file), { recursive: true })
 
 // The service worker caches every app file except the examples, which are fetched on demand.
 const files = []
@@ -40,7 +41,7 @@ const walk = dir => {
 	}
 }
 walk(out)
-const cached = ['./', ...files.filter(f => !f.startsWith('demo/') && !f.startsWith('.') && f !== 'index.html')]
+const cached = ['./', ...files.filter(f => !f.startsWith('demo/') && !f.startsWith('.') && !f.startsWith('LICENSE') && !f.startsWith('THIRD-PARTY') && f !== 'index.html')]
 const worker = readFileSync(join(root, 'pages/sw.js'), 'utf8')
 	.replace('__BUILD__', version + '-' + Date.now().toString(36))
 	.replace('__FILES__', JSON.stringify(cached))

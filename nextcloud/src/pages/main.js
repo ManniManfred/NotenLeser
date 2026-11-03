@@ -1,6 +1,6 @@
 import * as pdfjs from 'pdfjs-dist'
 import { Reader } from '../web/reader.js'
-import { DEFAULT_SETTINGS } from '../nextcloud/settingsStore.js'
+import { DEFAULT_SETTINGS } from '../web/settings.js'
 import { LocalSettingsStore } from '../standalone/httpSource.js'
 import { LocalSource, loadRoot, storeRoot } from './localSource.js'
 
