@@ -1,5 +1,16 @@
 name: GitHub Pages (Web-App)
 
+# Builds the web app (nextcloud/dist-pages) and publishes it.
+#
+# Two ways, chosen by the repository variable PAGES_REPO:
+# - PAGES_REPO not set: GitHub Pages of this repository (needs a public repository or a paid plan;
+#   Settings → Pages → Source: GitHub Actions).
+# - PAGES_REPO = "owner/name" of a separate public repository: only the built files are pushed to its
+#   branch gh-pages (or PAGES_BRANCH), so the source code here can stay private. Needs the secret
+#   PAGES_DEPLOY_TOKEN, a fine-grained token for that repository with "Contents: read and write"
+#   (and "Pages: read and write" so the workflow can switch Pages on by itself).
+# Optional: PAGES_CNAME for an own domain.
+
 on:
   push:
     branches: [main]
@@ -10,8 +21,6 @@ on:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
   group: pages
@@ -33,17 +42,74 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build:pages
-      - uses: actions/configure-pages@v5
+      - name: Own domain
+        if: vars.PAGES_CNAME != ''
+        run: echo "${{ vars.PAGES_CNAME }}" > dist-pages/CNAME
       - uses: actions/upload-pages-artifact@v3
         with:
           path: nextcloud/dist-pages
 
+  # GitHub Pages of this repository.
   deploy:
+    if: vars.PAGES_REPO == ''
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
+
+  # Separate public repository that only holds the built web app.
+  deploy-external:
+    if: vars.PAGES_REPO != ''
+    needs: build
+    runs-on: ubuntu-latest
+    env:
+      REPO: ${{ vars.PAGES_REPO }}
+      BRANCH: ${{ vars.PAGES_BRANCH || 'gh-pages' }}
+      GH_TOKEN: ${{ secrets.PAGES_DEPLOY_TOKEN }}
+    steps:
+      - name: Check configuration
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::Secret PAGES_DEPLOY_TOKEN fehlt (Token mit Schreibrecht auf $REPO)."
+            exit 1
+          fi
+      - uses: actions/download-artifact@v4
+        with:
+          name: github-pages
+      - name: Unpack
+        run: |
+          mkdir site
+          tar -xf artifact.tar -C site
+          cat > site/README.md <<EOF
+          # NotenLeser – Web-App
+
+          Automatisch gebaute Dateien der NotenLeser-Web-App. Bitte hier nichts ändern:
+          jeder Build ersetzt den Branch \`$BRANCH\` vollständig.
+          EOF
+      - name: Push to ${{ vars.PAGES_REPO }}
+        working-directory: site
+        run: |
+          git init -q -b "$BRANCH"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "Web-App bauen (${GITHUB_SHA::7})"
+          git push -q --force "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" "HEAD:refs/heads/$BRANCH"
+      - name: Switch on GitHub Pages
+        run: |
+          if gh api "repos/$REPO/pages" > /dev/null 2>&1; then
+            echo "GitHub Pages ist schon eingeschaltet."
+          elif gh api -X POST "repos/$REPO/pages" -f "source[branch]=$BRANCH" -f "source[path]=/" > /dev/null; then
+            echo "GitHub Pages eingeschaltet."
+          else
+            echo "::warning::Pages konnte nicht eingeschaltet werden. Im Repository $REPO unter Settings → Pages: Deploy from a branch → $BRANCH / (root) wählen."
+          fi
+          url=$(gh api "repos/$REPO/pages" --jq .html_url 2>/dev/null || true)
+          if [ -n "$url" ]; then echo "### Web-App: $url" >> "$GITHUB_STEP_SUMMARY"; fi
