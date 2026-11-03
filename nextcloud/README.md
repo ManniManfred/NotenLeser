@@ -18,6 +18,17 @@ Web-Version des NotenLesers als Nextcloud-App. Noten (PDF und MuseScore) aus den
 
 Die Kamerabilder werden nur im Browser zu einem groben Helligkeitsraster verrechnet, nie gespeichert oder übertragen. Kamerazugriff erlaubt der Browser nur über HTTPS.
 
+## Web-App ohne Nextcloud (GitHub Pages)
+
+Dieselbe Oberfläche läuft auch als reine Web-App: **https://mannimanfred.github.io/NotenLeser/**
+
+- „Noten öffnen“ wählt eine oder mehrere Dateien vom Gerät (auch auf dem iPhone); die gewählten Dateien bilden die Mappe zum Wischen nach oben/unten.
+- „Ordner öffnen“ öffnet einen ganzen Notenordner. In Chrome und Edge bleibt der Ordner gespeichert („Weiterlesen“ nach dem Neustart), und markierte Systeme werden als `.systems.json` direkt in den Ordner geschrieben – kompatibel mit Android- und Nextcloud-Version. In anderen Browsern werden Markierungen im Browser gespeichert.
+- „Beispiel ansehen“ lädt eine Beispiel-PDF und eine MuseScore-Datei.
+- Die Dateien bleiben auf dem Gerät, es wird nichts hochgeladen. Nach dem ersten Besuch funktioniert die App auch offline und lässt sich installieren bzw. zum Home-Bildschirm hinzufügen; installiert kann sie in Chrome/Edge als Programm zum Öffnen von PDF- und MuseScore-Dateien gewählt werden.
+
+Der Workflow `.github/workflows/pages.yml` baut und veröffentlicht die Seite bei jedem Push auf `main`, der `nextcloud/` ändert (oder manuell über „Run workflow“). Einmalig nötig: im Repository unter *Settings → Pages* als Quelle „GitHub Actions“ wählen. Lokal bauen: `npm run build:pages` (Ergebnis in `dist-pages/`).
+
 ## Installation
 
 Voraussetzung: Nextcloud 30 bis 33.
@@ -47,6 +58,7 @@ node scripts/dev-server.mjs /pfad/zu/noten 8085   # mit eigenem Notenordner
 | `src/web/` | Browser-Oberfläche: Reader, Dialoge, Web-Audio-Wiedergabe, Kamera |
 | `src/nextcloud/` | Anbindung an Nextcloud: WebDAV-Dateizugriff, Einstellungen, Dateiaktion |
 | `src/standalone/` | Anbindung ohne Nextcloud (lokaler Dev-Server); Vorlage für eine spätere Desktop-Version (z. B. Tauri) |
+| `src/pages/`, `pages/` | Web-App für GitHub Pages: Dateien vom Gerät, Beispiele, Offline-Betrieb (Service Worker), Manifest |
 
 Der Reader bekommt Dateizugriff (`list`, `read`, `readText`, `write`) und Einstellungsspeicher (`load`, `save`) von außen. Für eine Desktop-Version muss nur diese Anbindung neu geschrieben werden.
 

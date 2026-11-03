@@ -32,7 +32,10 @@ export function sidecarName(fileName) {
  *   version:  app version shown on the start page and in the settings
  */
 export class Reader {
-	constructor(root, { source, settings, pdfjs, fontUrl, version, onFileChange, bare = false, bareUrl = null, homeUrl = null }) {
+	constructor(root, {
+		source, settings, pdfjs, fontUrl, version, onFileChange, bare = false, bareUrl = null, homeUrl = null,
+		pickFile = null, pickFolder = null, onContinue = null, intro = null, startActions = [],
+	}) {
 		this.root = root
 		this.source = source
 		this.settingsStore = settings
@@ -45,6 +48,12 @@ export class Reader {
 		this.bare = bare
 		this.bareUrl = bareUrl
 		this.homeUrl = homeUrl
+		// Optional replacements for the built-in file browser, e.g. the device's own file picker.
+		this.pickFile = pickFile
+		this.pickFolder = pickFolder
+		this.onContinue = onContinue
+		this.intro = intro || 'Öffne eine Noten-PDF oder MuseScore-Datei aus deiner Nextcloud oder wähle einen Ordner mit Noten.'
+		this.startActions = startActions
 		this.doc = null
 		this.nav = null
 		this.path = null
@@ -108,13 +117,18 @@ export class Reader {
 		this.overlay.addEventListener('pointerdown', () => this.showControls())
 
 		this.continueButton = el('button', { class: 'nl-start-action nl-secondary', type: 'button' })
-		this.continueButton.addEventListener('click', () => this.openFile(this.settings.lastFile))
+		this.continueButton.addEventListener('click', async () => {
+			const path = this.settings.lastFile
+			if (this.onContinue && !(await this.onContinue(path))) return
+			this.openFile(path)
+		})
 		this.startPage = el('div', { class: 'nl-start' }, [
 			el('div', { class: 'nl-emblem' }, '♫'),
 			el('h2', {}, 'NotenLeser'),
-			el('p', { class: 'nl-intro' }, 'Öffne eine Noten-PDF oder MuseScore-Datei aus deiner Nextcloud oder wähle einen Ordner mit Noten.'),
+			el('p', { class: 'nl-intro' }, this.intro),
 			startAction('Noten öffnen', true, () => this.chooseFile()),
 			startAction('Ordner öffnen', false, () => this.chooseFolder()),
+			...this.startActions.map(([label, action]) => startAction(label, false, () => action(this))),
 			this.continueButton,
 			el('button', { class: 'nl-link', type: 'button', onclick: () => this.showSettings() }, 'Einstellungen'),
 			el('button', { class: 'nl-link', type: 'button', onclick: () => this.toggleFullscreen() }, 'Vollbild'),
@@ -372,18 +386,43 @@ export class Reader {
 	// ---- files --------------------------------------------------------------------------------------------
 
 	async chooseFile() {
-		const start = this.folder || this.settings.lastFolder || '/'
-		const path = await new FileBrowser(this.root, this.source, { mode: 'file', start, filter: isScoreFileName }).open()
+		let path
+		try {
+			path = this.pickFile ? await this.pickFile() : await this.browse('file', this.folder || this.settings.lastFolder || '/')
+		} catch (e) {
+			this.toast(e.message, true)
+			return
+		}
 		if (path) this.openFile(path)
 	}
 
+	/** Shows the built-in file browser for the current source. */
+	browse(mode, start = '/') {
+		return new FileBrowser(this.root, this.source, { mode, start, filter: isScoreFileName }).open()
+	}
+
 	async chooseFolder() {
-		const start = this.folder || this.settings.lastFolder || '/'
-		const folder = await new FileBrowser(this.root, this.source, { mode: 'folder', start, filter: isScoreFileName }).open()
+		let folder
+		try {
+			folder = this.pickFolder ? await this.pickFolder() : await this.browse('folder', this.folder || this.settings.lastFolder || '/')
+		} catch (e) {
+			this.toast(e.message, true)
+			return
+		}
 		if (!folder) return
 		try {
 			const files = await this.loadFolder(folder)
-			if (files.length === 0) { this.toast('In diesem Ordner wurden keine PDF- oder MuseScore-Dateien gefunden', true); return }
+			if (files.length === 0) {
+				// The scores may sit in subfolders, so let the player pick one there.
+				const entries = await this.source.list(folder)
+				if (entries.some(entry => entry.isDir)) {
+					const path = await this.browse('file', folder)
+					if (path) this.openFile(path)
+					return
+				}
+				this.toast('In diesem Ordner wurden keine PDF- oder MuseScore-Dateien gefunden', true)
+				return
+			}
 			this.toast(`${files.length} Notendateien im Ordner gefunden`)
 			this.openFile(files[0].path)
 		} catch (e) {

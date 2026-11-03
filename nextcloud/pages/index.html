@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>NotenLeser</title>
+<meta name="description" content="Noten (PDF und MuseScore) im Vollbild lesen, systemweise blättern und abspielen – direkt im Browser.">
+<meta name="theme-color" content="#14181d">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="NotenLeser">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="img/icon-192.png">
+<link rel="apple-touch-icon" href="img/icon-180.png">
+<link rel="stylesheet" href="css/notenleser.css">
+<style>
+html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+#notenleser { position: fixed; inset: 0; height: 100dvh; }
+</style>
+</head>
+<body>
+<div id="notenleser"></div>
+<noscript>Der NotenLeser braucht JavaScript.</noscript>
+<script src="js/notenleser-pages.js"></script>
+</body>
+</html>

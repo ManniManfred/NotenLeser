@@ -1,0 +1,22 @@
+{
+  "name": "NotenLeser",
+  "short_name": "NotenLeser",
+  "description": "Noten im Vollbild lesen, systemweise blättern und abspielen",
+  "start_url": "./",
+  "scope": "./",
+  "display": "fullscreen",
+  "display_override": ["fullscreen", "standalone"],
+  "orientation": "any",
+  "background_color": "#14181d",
+  "theme_color": "#14181d",
+  "icons": [
+    { "src": "img/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "img/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ],
+  "file_handlers": [
+    {
+      "action": "./",
+      "accept": { "application/pdf": [".pdf"], "application/x-musescore": [".mscz"], "application/x-musescore+xml": [".mscx"] }
+    }
+  ]
+}
