@@ -16,6 +16,7 @@ class SettingsService {
 		'cameraGestures' => ['bool', false, null],
 		'cameraSensitivity' => ['int', 0, [0, 1, 2]],
 		'cameraDebug' => ['bool', false, null],
+		'autoFullscreen' => ['bool', true, null],
 		'playbackSpeed' => ['int', 100, [50, 75, 100, 125]],
 		'lastFile' => ['string', '', null],
 		'lastFolder' => ['string', '', null],

@@ -112,6 +112,9 @@ export function showSettingsDialog(root, settings, { maxVoice, speeds, version }
 		el('h4', {}, 'Anzeige'),
 		checkbox('twoSystemsMinimum', 'Immer mindestens 2 Systeme anzeigen', settings.twoSystemsMinimum),
 		hint('Das folgende System ist schon zu sehen, damit du vorauslesen kannst. Passen beide nicht auf den Bildschirm, werden sie verkleinert.'),
+		checkbox('autoFullscreen', 'Beim Öffnen von Noten in den Vollbildmodus wechseln', settings.autoFullscreen),
+		hint('Ein- und Ausschalten jederzeit mit ⛶ oder der Taste F. Auf dem iPhone öffnet ⛶ die Ansicht ohne Nextcloud-Kopfzeile; '
+			+ 'über „Teilen → Zum Home-Bildschirm“ startet der NotenLeser dann wie eine eigene App im Vollbild.'),
 		el('h4', {}, 'Steuerung'),
 		checkbox('cameraGestures', 'Mit Handbewegung vor der Frontkamera blättern', settings.cameraGestures),
 		hint('Finger oder Hand vor der Kamera von rechts nach links bewegen: nächstes System; von links nach rechts: vorheriges System. '
@@ -136,6 +139,7 @@ export function showSettingsDialog(root, settings, { maxVoice, speeds, version }
 				close({
 					voice: Number(data.get('voice') ?? 0),
 					twoSystemsMinimum: data.has('twoSystemsMinimum'),
+					autoFullscreen: data.has('autoFullscreen'),
 					cameraGestures: data.has('cameraGestures'),
 					cameraSensitivity: Number(data.get('cameraSensitivity') ?? 0),
 					cameraDebug: data.has('cameraDebug'),

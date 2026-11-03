@@ -32,7 +32,7 @@ export function sidecarName(fileName) {
  *   version:  app version shown on the start page and in the settings
  */
 export class Reader {
-	constructor(root, { source, settings, pdfjs, fontUrl, version, onFileChange }) {
+	constructor(root, { source, settings, pdfjs, fontUrl, version, onFileChange, bare = false, bareUrl = null, homeUrl = null }) {
 		this.root = root
 		this.source = source
 		this.settingsStore = settings
@@ -41,6 +41,10 @@ export class Reader {
 		this.fontUrl = fontUrl
 		this.version = version
 		this.onFileChange = onFileChange || (() => {})
+		// Header-less mode (bare) and how to get there or back, for browsers without a fullscreen mode.
+		this.bare = bare
+		this.bareUrl = bareUrl
+		this.homeUrl = homeUrl
 		this.doc = null
 		this.nav = null
 		this.path = null
@@ -95,6 +99,7 @@ export class Reader {
 			button('Öffnen', () => this.chooseFile()),
 			this.detectionButton, this.editButton,
 			button('⚙', () => this.showSettings(), 'Einstellungen'),
+			this.bare && this.homeUrl ? button('⌂', () => this.goHome(), 'Zurück zu Nextcloud') : null,
 			this.fullscreenButton,
 			this.previousButton, this.nextButton, this.undoEditButton, this.removeButton, this.clearButton,
 		])
@@ -112,7 +117,9 @@ export class Reader {
 			startAction('Ordner öffnen', false, () => this.chooseFolder()),
 			this.continueButton,
 			el('button', { class: 'nl-link', type: 'button', onclick: () => this.showSettings() }, 'Einstellungen'),
-			el('p', { class: 'nl-hint' }, 'Wischen ← → oder Pfeiltasten blättert   ·   Wischen ↑ ↓ wechselt die Datei'),
+			el('button', { class: 'nl-link', type: 'button', onclick: () => this.toggleFullscreen() }, 'Vollbild'),
+			this.bare && this.homeUrl ? el('button', { class: 'nl-link', type: 'button', onclick: () => this.goHome() }, 'Zurück zu Nextcloud') : null,
+			el('p', { class: 'nl-hint' }, 'Wischen ← → oder Pfeiltasten blättert   ·   Wischen ↑ ↓ wechselt die Datei   ·   F: Vollbild'),
 			el('p', { class: 'nl-version' }, this.versionLabel()),
 		])
 		this.banner = el('div', { class: 'nl-panel nl-banner' })
@@ -220,9 +227,9 @@ export class Reader {
 			this.updateCamera()
 		}
 		document.addEventListener('visibilitychange', this.visibilityHandler)
-		document.addEventListener('fullscreenchange', () => {
-			this.fullscreenButton.classList.toggle('nl-accent', document.fullscreenElement === this.root)
-		})
+		const fullscreenChanged = () => this.fullscreenButton.classList.toggle('nl-accent', this.isFullscreen())
+		document.addEventListener('fullscreenchange', fullscreenChanged)
+		document.addEventListener('webkitfullscreenchange', fullscreenChanged)
 	}
 
 	/** Serialises navigation so that fast pedal presses or swipes never overtake each other. */
@@ -348,11 +355,13 @@ export class Reader {
 	 * A held pedal repeats its key; it should still turn only once.
 	 */
 	onKey(e) {
-		if (!this.doc || e.ctrlKey || e.metaKey || e.altKey) return
+		if (e.ctrlKey || e.metaKey || e.altKey) return
 		if (this.root.querySelector('.nl-dialog')) return
 		const target = e.target
 		if (target && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) return
 		if (!this.root.isConnected) return
+		if ((e.key === 'f' || e.key === 'F') && !e.repeat) { e.preventDefault(); this.toggleFullscreen(); return }
+		if (!this.doc) return
 		const direction = pedalDirection(e.key)
 		if (direction === 0) return
 		e.preventDefault()
@@ -413,6 +422,8 @@ export class Reader {
 	async openFile(path, startAtEnd = false) {
 		if (!path) return
 		const token = ++this.openToken
+		// Must happen right away: browsers only allow fullscreen shortly after a click or key press.
+		if (this.settings.autoFullscreen) this.enterFullscreen(true)
 		const folder = parentOf(path)
 		const name = baseName(path)
 		const index = this.folder === folder ? this.folderFiles.findIndex(f => f.path === path) : -1
@@ -800,9 +811,48 @@ export class Reader {
 		this.run(() => this.render())
 	}
 
+	static fullscreenSupported() {
+		return !!(document.fullscreenEnabled || document.webkitFullscreenEnabled)
+	}
+
+	isFullscreen() {
+		return (document.fullscreenElement || document.webkitFullscreenElement) === this.root
+	}
+
+	/** Enters the browser's fullscreen mode; quiet attempts fail silently when the browser refuses. */
+	enterFullscreen(quiet = false) {
+		if (this.isFullscreen() || !Reader.fullscreenSupported()) return false
+		const request = this.root.requestFullscreen || this.root.webkitRequestFullscreen
+		try {
+			const result = request.call(this.root, { navigationUI: 'hide' })
+			if (result && result.catch) result.catch(() => { if (!quiet) this.toast('Der Browser hat den Vollbildmodus abgelehnt') })
+			return true
+		} catch (e) {
+			if (!quiet) this.toast('Der Browser hat den Vollbildmodus abgelehnt')
+			return false
+		}
+	}
+
+	exitFullscreen() {
+		const exit = document.exitFullscreen || document.webkitExitFullscreen
+		if (exit) { const result = exit.call(document); if (result && result.catch) result.catch(() => {}) }
+	}
+
+	/**
+	 * Toggles fullscreen. Browsers without a fullscreen mode for pages (Safari on the iPhone) switch to the
+	 * header-less reader instead, which can also be added to the home screen.
+	 */
 	toggleFullscreen() {
-		if (document.fullscreenElement) document.exitFullscreen().catch(() => {})
-		else if (this.root.requestFullscreen) this.root.requestFullscreen().catch(() => this.toast('Vollbild ist hier nicht möglich'))
+		if (this.isFullscreen()) { this.exitFullscreen(); return }
+		if (Reader.fullscreenSupported()) { this.enterFullscreen(false); return }
+		if (!this.bare && this.bareUrl) { window.location.href = this.bareUrl(this.path); return }
+		this.toast('Für Vollbild in Safari „Teilen → Zum Home-Bildschirm“ wählen und NotenLeser von dort starten', true)
+	}
+
+	goHome() {
+		if (!this.homeUrl) return
+		this.exitFullscreen()
+		window.location.href = this.homeUrl(this.path)
 	}
 
 	async updateWakeLock() {

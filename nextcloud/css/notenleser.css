@@ -20,6 +20,7 @@
 	-webkit-user-select: none;
 }
 .nl-root:fullscreen { width: 100vw; height: 100vh; }
+.nl-root:-webkit-full-screen { width: 100vw; height: 100vh; }
 .nl-root [hidden] { display: none !important; }
 
 .nl-score {
@@ -42,7 +43,9 @@
 }
 
 .nl-overlay {
-	position: absolute; top: 12px; left: 12px;
+	position: absolute;
+	top: max(12px, env(safe-area-inset-top));
+	left: max(12px, env(safe-area-inset-left));
 	max-width: calc(100% - 24px);
 	padding: 12px 14px;
 	transition: opacity 350ms;
