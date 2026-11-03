@@ -7,4 +7,4 @@
 
 ## Releases
 
-- Die APK baut GitHub Actions (`.github/workflows/release-apk.yml`), sobald ein Tag `v*` gepusht wird. Details stehen in der README.
+- Die APK baut GitHub Actions (`.github/workflows/release-apk.yml`), sobald ein Tag `v*` gepusht wird. Details stehen in `app/README.md`.

@@ -16,8 +16,11 @@
 	<namespace>NotenLeser</namespace>
 	<category>multimedia</category>
 	<category>files</category>
+	<website>https://github.com/ManniManfred/NotenLeser</website>
 	<bugs>https://github.com/ManniManfred/NotenLeser/issues</bugs>
 	<repository type="git">https://github.com/ManniManfred/NotenLeser</repository>
+	<screenshot>https://raw.githubusercontent.com/ManniManfred/NotenLeser/main/docs/screenshots/pdf-systeme.png</screenshot>
+	<screenshot>https://raw.githubusercontent.com/ManniManfred/NotenLeser/main/docs/screenshots/musescore.png</screenshot>
 	<dependencies>
 		<nextcloud min-version="30" max-version="33"/>
 	</dependencies>

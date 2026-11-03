@@ -1,18 +1,10 @@
 import { getRequestToken } from '@nextcloud/auth'
 import { loadState } from '@nextcloud/initial-state'
 import { generateUrl } from '@nextcloud/router'
+import { DEFAULT_SETTINGS } from '../web/settings.js'
 
-export const DEFAULT_SETTINGS = {
-	voice: 0,
-	twoSystemsMinimum: false,
-	autoFullscreen: true,
-	cameraGestures: false,
-	cameraSensitivity: 0,
-	cameraDebug: false,
-	playbackSpeed: 100,
-	lastFile: '',
-	lastFolder: '',
-}
+export { DEFAULT_SETTINGS }
+
 
 /** Reader settings stored as Nextcloud user preferences, so they follow the user to every device. */
 export class NextcloudSettingsStore {

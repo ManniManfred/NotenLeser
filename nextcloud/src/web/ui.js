@@ -1,5 +1,8 @@
 /** Small DOM helpers, the file browser and the settings dialog. */
 
+/** Where users of every version find the source code (AGPL-3.0, section 13) and the licenses. */
+export const SOURCE_URL = 'https://github.com/ManniManfred/NotenLeser'
+
 export function el(tag, attributes = {}, children = []) {
 	const element = document.createElement(tag)
 	for (const [key, value] of Object.entries(attributes)) {
@@ -126,7 +129,7 @@ export function showSettingsDialog(root, settings, { maxVoice, speeds, version }
 		hint('Bluetooth-Blätterpedale, die sich als Tastatur verbinden, funktionieren ohne Einstellung (Pfeiltasten, Bild↑/↓, Leertaste).'),
 		el('h4', {}, 'Wiedergabe (MuseScore)'),
 		radios('playbackSpeed', speeds.map(speed => [speed, speed === 100 ? 'Originaltempo' : `Tempo ${speed} %`]), settings.playbackSpeed),
-		el('p', { class: 'nl-version' }, version),
+		el('p', { class: 'nl-version' }, [version, ' · ', el('a', { href: SOURCE_URL, target: '_blank', rel: 'noopener' }, 'Quellcode und Lizenzen (AGPL-3.0)')]),
 	])
 	form.addEventListener('submit', e => e.preventDefault())
 	return dialog(root, 'Einstellungen', form, close => [
