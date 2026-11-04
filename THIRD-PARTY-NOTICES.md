@@ -5,7 +5,7 @@ Folgende Bestandteile Dritter werden mitgeliefert oder in die gebauten Dateien e
 
 | Bestandteil | Version | Lizenz | Verwendet in | Quelle |
 |---|---|---|---|---|
-| Leland (Notenschrift) | – | SIL Open Font License 1.1, Reserved Font Name „Leland“ | Android, Web, Nextcloud | https://github.com/MuseScoreFonts/Leland |
+| Leland (Notenschrift) | – | SIL Open Font License 1.1, Reserved Font Name „Leland“ | Web, Nextcloud | https://github.com/MuseScoreFonts/Leland |
 | pdf.js (`pdfjs-dist`) | 6.5.438 | Apache-2.0 | Web, Nextcloud | https://github.com/mozilla/pdf.js |
 | fflate | 0.8.3 | MIT | Web, Nextcloud | https://github.com/101arrowz/fflate |
 | @nextcloud/auth, router, initial-state, event-bus, browser-storage, logger | siehe `nextcloud/package-lock.json` | GPL-3.0-or-later | Nextcloud | https://github.com/nextcloud-libraries |
@@ -13,7 +13,6 @@ Folgende Bestandteile Dritter werden mitgeliefert oder in die gebauten Dateien e
 | semver | 7.8.6 | ISC | Nextcloud | https://github.com/npm/node-semver |
 | typescript-event-target | 1.1.2 | MIT | Nextcloud | https://github.com/DerZade/typescript-event-target |
 | FluidR3Mono GM (Klänge der Wiedergabe, umgewandelt nach `nextcloud/sounds/`) | 2.312 (2016) | MIT | Web, Nextcloud | https://github.com/musescore/MuseScore/blob/v2.3.2/share/sound/FluidR3Mono_GM.sf3 |
-| Gradle Wrapper (`gradle/wrapper/gradle-wrapper.jar`) | 9.6.0 | Apache-2.0 | Android-Build | https://github.com/gradle/gradle |
 
 Lizenztexte: [Apache-2.0](LICENSES/Apache-2.0.txt), [GPL-3.0](LICENSES/GPL-3.0.txt), [OFL-1.1 (Leland)](LICENSES/OFL-1.1-Leland.txt); MIT und ISC folgen unten.
 Die Schriftdatei `Leland.otf` wird unverändert weitergegeben.
@@ -21,7 +20,7 @@ Die Schriftdatei `Leland.otf` wird unverändert weitergegeben.
 Die Beispielnoten (`nextcloud/pages/demo/`) und Testdateien (`nextcloud/tests/fixtures/`) wurden für dieses Projekt erstellt
 und stehen wie der übrige Code unter der AGPL.
 
-Werkzeuge, die nur beim Bauen oder Testen laufen (esbuild, @xmldom/xmldom, Android Gradle Plugin), werden nicht mit ausgeliefert.
+Werkzeuge, die nur beim Bauen oder Testen laufen (esbuild, @xmldom/xmldom), werden nicht mit ausgeliefert.
 
 ## fflate
 

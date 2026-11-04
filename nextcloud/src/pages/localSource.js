@@ -3,7 +3,7 @@
  *
  * Three kinds of roots, one at a time:
  * - a folder opened with the File System Access API (Chrome, Edge): browsable, and .systems.json files are
- *   written next to the scores like in the Android and Nextcloud versions;
+ *   written next to the scores like in the Nextcloud version;
  * - files picked with a file input (all browsers, also iPhone): kept in memory, sidecars go to localStorage;
  * - the bundled example scores, loaded over HTTP.
  * Paths look like "/Ordner/Lied.pdf" relative to the chosen root.

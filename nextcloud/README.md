@@ -1,6 +1,6 @@
 # NotenLeser für Nextcloud
 
-Web-Version des NotenLesers als Nextcloud-App. Noten (PDF und MuseScore) aus den eigenen Nextcloud-Dateien werden im Browser im Vollbild gelesen, systemweise geblättert und – bei MuseScore – abgespielt. Funktionsumfang und Bedienung entsprechen der Android-App.
+Web-Version des NotenLesers als Nextcloud-App. Noten (PDF und MuseScore) aus den eigenen Nextcloud-Dateien werden im Browser im Vollbild gelesen, systemweise geblättert und – bei MuseScore – abgespielt.
 
 ## Funktionen
 
@@ -11,7 +11,7 @@ Web-Version des NotenLesers als Nextcloud-App. Noten (PDF und MuseScore) aus den
 - **Blättern**: Wischen ← → (Finger oder Maus) wechselt das System, mit zwei Fingern um alle sichtbaren Systeme; Mausrad/Touchpad blättert ebenfalls. Mehrere Systeme werden gleichzeitig gezeigt, wenn Platz ist, auch über Seitengrenzen. Markierung „Seite·System“ an jedem System.
 - **Blätterpedale** (Bluetooth, als Tastatur verbunden) und Tastatur: Pfeil rechts/unten, Bild↓, Leertaste, Enter, „Nächster Titel“ → weiter; Pfeil links/oben, Bild↑, „Vorheriger Titel“ → zurück. Gehaltene Tasten blättern nur einmal.
 - **Einstellungen** (⚙): eigene Stimme hervorheben (1.–6.), immer mindestens 2 Systeme, Blättern per Handbewegung vor der Kamera (Empfindlichkeit, Debug-Ansicht), Wiedergabetempo. Die Einstellungen werden als Nextcloud-Benutzereinstellungen gespeichert und gelten damit auf allen Geräten.
-- **Bearbeiten**: Seitenweise Ansicht, in der Systeme durch Ziehen markiert, verschoben oder in der Höhe geändert werden (Zoom mit zwei Fingern oder Mausrad). Ausgangspunkt sind die automatisch erkannten Systeme. Gespeichert wird als `<Name>.systems.json` neben der Notendatei – dasselbe Format wie in der Android-App, beide Versionen nutzen also dieselben Markierungen.
+- **Bearbeiten**: Seitenweise Ansicht, in der Systeme durch Ziehen markiert, verschoben oder in der Höhe geändert werden (Zoom mit zwei Fingern oder Mausrad). Ausgangspunkt sind die automatisch erkannten Systeme. Gespeichert wird als `<Name>.systems.json` neben der Notendatei – dasselbe Format wie in der Web-App ohne Nextcloud, beide nutzen also dieselben Markierungen.
 - **Wiedergabe** (▶, nur MuseScore): echte Instrumentenklänge (General-MIDI-Samples aus FluidR3Mono, siehe unten) mit Tempo, Dynamik, Akzenten, Staccato, Haltebögen, Wiederholungen und Volten. Der klingende Takt wird markiert, die Ansicht blättert automatisch mit. Mit **Bereich** wird ein Übungsausschnitt markiert: ersten und letzten Takt antippen (dazwischen darf geblättert werden), ▶ spielt dann nur diese Takte in Schleife. Ein weiterer Tipp auf die Taste hebt den Bereich auf. Mit **Stimmen** wird die Wiedergabe auf eine oder mehrere Stimmen (Instrumente) beschränkt; die übrigen sind stumm oder spielen leise mit, „Nur meine Stimme“ übernimmt die eigene Stimme aus den Einstellungen.
 - **Vollbild**: Beim Öffnen von Noten wechselt der NotenLeser automatisch in den Vollbildmodus (in den Einstellungen abschaltbar). ⛶ in der Leiste oder die Taste **F** schalten jederzeit um. Der Bildschirm bleibt an, solange Noten offen sind (Wake Lock).
 - **iPhone**: Safari kennt dort keinen Vollbildmodus für Webseiten. ⛶ öffnet stattdessen die Ansicht ohne Nextcloud-Kopfzeile (`/apps/notenleser/reader`). Über „Teilen → Zum Home-Bildschirm“ wird daraus ein eigenes App-Symbol, das den NotenLeser wie eine App im Vollbild startet (beim ersten Start einmal bei Nextcloud anmelden). ⌂ führt zurück zur normalen Nextcloud-Ansicht. Auf Android bietet Chrome über das Web-App-Manifest ebenfalls „Zum Startbildschirm hinzufügen“ an.
@@ -23,7 +23,7 @@ Die Kamerabilder werden nur im Browser zu einem groben Helligkeitsraster verrech
 Dieselbe Oberfläche läuft auch als reine Web-App ohne Server: **https://mannimanfred.github.io/NotenLeser/**
 
 - „Noten öffnen“ wählt eine oder mehrere Dateien vom Gerät (auch auf dem iPhone); die gewählten Dateien bilden die Mappe zum Wischen nach oben/unten.
-- „Ordner öffnen“ öffnet einen ganzen Notenordner. In Chrome und Edge bleibt der Ordner gespeichert („Weiterlesen“ nach dem Neustart), und markierte Systeme werden als `.systems.json` direkt in den Ordner geschrieben – kompatibel mit Android- und Nextcloud-Version. In anderen Browsern werden Markierungen im Browser gespeichert.
+- „Ordner öffnen“ öffnet einen ganzen Notenordner. In Chrome und Edge bleibt der Ordner gespeichert („Weiterlesen“ nach dem Neustart), und markierte Systeme werden als `.systems.json` direkt in den Ordner geschrieben – kompatibel mit der Nextcloud-Version. In anderen Browsern werden Markierungen im Browser gespeichert.
 - „Beispiel ansehen“ lädt eine Beispiel-PDF und eine MuseScore-Datei.
 - Die Dateien bleiben auf dem Gerät, es wird nichts hochgeladen. Nach dem ersten Besuch funktioniert die App auch offline und lässt sich installieren bzw. zum Home-Bildschirm hinzufügen; installiert kann sie in Chrome/Edge als Programm zum Öffnen von PDF- und MuseScore-Dateien gewählt werden.
 

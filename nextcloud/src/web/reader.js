@@ -20,7 +20,7 @@ const parentOf = path => path.substring(0, path.lastIndexOf('/')) || '/'
 const baseName = path => path.substring(path.lastIndexOf('/') + 1)
 const joinPath = (folder, name) => (folder === '/' ? '' : folder) + '/' + name
 
-/** Name of the file with manually marked systems; only PDFs drop their extension, like in the Android app. */
+/** Name of the file with manually marked systems; only PDFs drop their extension (as files from older versions do). */
 export function sidecarName(fileName) {
 	return fileName.replace(/\.pdf$/i, '') + '.systems.json'
 }
