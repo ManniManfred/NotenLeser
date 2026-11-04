@@ -1,5 +1,10 @@
 # Hinweise für Claude
 
+## Sprache
+
+- Immer auf Deutsch antworten, auch bei Rückfragen, Zusammenfassungen und Commit-Nachrichten.
+- Code-Kommentare und Bezeichner bleiben wie im bestehenden Code auf Englisch; Texte in der Oberfläche und in den READMEs auf Deutsch.
+
 ## Git
 
 - Änderungen immer direkt auf `main` committen und pushen (`git push origin HEAD:main`), keine Feature-Branches und keine Pull Requests.
