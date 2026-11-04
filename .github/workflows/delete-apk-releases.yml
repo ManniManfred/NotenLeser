@@ -3,6 +3,9 @@ name: Alte APK-Releases löschen
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/delete-apk-releases.yml']
 
 permissions:
   contents: write
@@ -16,6 +19,6 @@ jobs:
     steps:
       - run: |
           for tag in v0.1.0 v0.2.0; do
-            gh release view "$tag" --json assets --jq '.assets[].name'
-            gh release delete "$tag" --yes
+            gh release view "$tag" --json assets --jq '.assets[].name' || continue
+            gh release delete "$tag" --yes || true
           done
