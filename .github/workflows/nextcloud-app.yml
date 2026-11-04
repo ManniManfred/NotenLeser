@@ -11,6 +11,11 @@ on:
     paths:
       - 'nextcloud/**'
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Als Release veröffentlichen: Versionsnummer wie in appinfo/info.xml (z. B. 0.3.0); leer = nur bauen'
+        required: false
+        default: ''
 
 jobs:
   build:
@@ -36,15 +41,23 @@ jobs:
         with:
           name: notenleser-nextcloud
           path: nextcloud/build/notenleser-*.tar.gz
-      # A tag v<version> publishes a GitHub release with the Nextcloud package; the version must match info.xml.
+      # A tag v<version>, or a manual run with a version, publishes a GitHub release with the Nextcloud package.
+      # The version must match appinfo/info.xml; a manual run creates the tag itself.
       - name: Versionsnummer prüfen
-        if: startsWith(github.ref, 'refs/tags/v')
+        id: release
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.version != ''
+        env:
+          WANTED: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('v{0}', inputs.version) }}
         run: |
           version=$(sed -n 's:.*<version>\(.*\)</version>.*:\1:p' appinfo/info.xml)
-          test "v$version" = "${GITHUB_REF_NAME}" || { echo "Tag ${GITHUB_REF_NAME} passt nicht zu Version $version in appinfo/info.xml"; exit 1; }
+          test "v$version" = "$WANTED" || { echo "$WANTED passt nicht zu Version $version in appinfo/info.xml"; exit 1; }
+          echo "tag=$WANTED" >> "$GITHUB_OUTPUT"
       - name: GitHub-Release anlegen
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: steps.release.outputs.tag != ''
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.release.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: NotenLeser ${{ steps.release.outputs.tag }}
           files: nextcloud/build/notenleser-*.tar.gz
           generate_release_notes: true
