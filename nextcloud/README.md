@@ -12,7 +12,7 @@ Web-Version des NotenLesers als Nextcloud-App. Noten (PDF und MuseScore) aus den
 - **Blätterpedale** (Bluetooth, als Tastatur verbunden) und Tastatur: Pfeil rechts/unten, Bild↓, Leertaste, Enter, „Nächster Titel“ → weiter; Pfeil links/oben, Bild↑, „Vorheriger Titel“ → zurück. Gehaltene Tasten blättern nur einmal.
 - **Einstellungen** (⚙): eigene Stimme hervorheben (1.–6.), immer mindestens 2 Systeme, Blättern per Handbewegung vor der Kamera (Empfindlichkeit, Debug-Ansicht), Wiedergabetempo. Die Einstellungen werden als Nextcloud-Benutzereinstellungen gespeichert und gelten damit auf allen Geräten.
 - **Bearbeiten**: Seitenweise Ansicht, in der Systeme durch Ziehen markiert, verschoben oder in der Höhe geändert werden (Zoom mit zwei Fingern oder Mausrad). Ausgangspunkt sind die automatisch erkannten Systeme. Gespeichert wird als `<Name>.systems.json` neben der Notendatei – dasselbe Format wie in der Android-App, beide Versionen nutzen also dieselben Markierungen.
-- **Wiedergabe** (▶, nur MuseScore): kleiner Web-Audio-Synthesizer mit Klangfarben je Instrumentenfamilie, Tempo, Dynamik, Akzenten, Staccato, Haltebögen, Wiederholungen und Volten. Der klingende Takt wird markiert, die Ansicht blättert automatisch mit. Mit **Bereich** wird ein Übungsausschnitt markiert: ersten und letzten Takt antippen (dazwischen darf geblättert werden), ▶ spielt dann nur diese Takte in Schleife. Ein weiterer Tipp auf die Taste hebt den Bereich auf. Mit **Stimmen** wird die Wiedergabe auf eine oder mehrere Stimmen (Instrumente) beschränkt; die übrigen sind stumm oder spielen leise mit, „Nur meine Stimme“ übernimmt die eigene Stimme aus den Einstellungen.
+- **Wiedergabe** (▶, nur MuseScore): echte Instrumentenklänge (General-MIDI-Samples aus FluidR3Mono, siehe unten) mit Tempo, Dynamik, Akzenten, Staccato, Haltebögen, Wiederholungen und Volten. Der klingende Takt wird markiert, die Ansicht blättert automatisch mit. Mit **Bereich** wird ein Übungsausschnitt markiert: ersten und letzten Takt antippen (dazwischen darf geblättert werden), ▶ spielt dann nur diese Takte in Schleife. Ein weiterer Tipp auf die Taste hebt den Bereich auf. Mit **Stimmen** wird die Wiedergabe auf eine oder mehrere Stimmen (Instrumente) beschränkt; die übrigen sind stumm oder spielen leise mit, „Nur meine Stimme“ übernimmt die eigene Stimme aus den Einstellungen.
 - **Vollbild**: Beim Öffnen von Noten wechselt der NotenLeser automatisch in den Vollbildmodus (in den Einstellungen abschaltbar). ⛶ in der Leiste oder die Taste **F** schalten jederzeit um. Der Bildschirm bleibt an, solange Noten offen sind (Wake Lock).
 - **iPhone**: Safari kennt dort keinen Vollbildmodus für Webseiten. ⛶ öffnet stattdessen die Ansicht ohne Nextcloud-Kopfzeile (`/apps/notenleser/reader`). Über „Teilen → Zum Home-Bildschirm“ wird daraus ein eigenes App-Symbol, das den NotenLeser wie eine App im Vollbild startet (beim ersten Start einmal bei Nextcloud anmelden). ⌂ führt zurück zur normalen Nextcloud-Ansicht. Auf Android bietet Chrome über das Web-App-Manifest ebenfalls „Zum Startbildschirm hinzufügen“ an.
 
@@ -32,6 +32,16 @@ Dieselbe Oberfläche läuft auch als reine Web-App ohne Server: **https://mannim
 Der Workflow `.github/workflows/pages.yml` baut die Seite bei jedem Push auf `main`, der `nextcloud/` ändert, und veröffentlicht sie auf GitHub Pages (manuell: *Actions → GitHub Pages (Web-App) → Run workflow*). Einmalig nötig: im Repository unter *Settings → Pages* als Quelle „GitHub Actions“ wählen. Lokal bauen: `npm run build:pages` (Ergebnis in `dist-pages/`). Die App nutzt nur relative Pfade und läuft unter jeder Adresse; `LICENSE` und `THIRD-PARTY-NOTICES.md` werden mit veröffentlicht.
 
 Optionale Repository-Variablen: `PAGES_CNAME` für eine eigene Domain. Mit `PAGES_REPO` (`owner/name`) und dem Secret `PAGES_DEPLOY_TOKEN` (Fine-grained Token für das Ziel-Repository mit *Contents* und *Pages: Read and write*) schiebt der Workflow die gebauten Dateien stattdessen in den Branch `gh-pages` (oder `PAGES_BRANCH`) eines anderen Repositorys und schaltet dort Pages ein – nützlich, falls dieses Repository einmal privat sein soll.
+
+## Klänge
+
+Die Wiedergabe nutzt gesampelte Instrumente aus der SoundFont **FluidR3Mono GM** (MIT-Lizenz, wie sie MuseScore 2 mitliefert). `scripts/build-sounds.mjs` hat daraus je General-MIDI-Instrument eine kleine Datei in `sounds/` gemacht (`<Programm>.wav`, Schlagzeug `drums.wav`; IMA ADPCM mit ~22 kHz, eine Dynamikstufe, Schleifenpunkte und Hüllkurven der SoundFont). Geladen werden nur die Instrumente, die das Stück braucht – beim ersten Abspielen kann das einen Moment dauern; die GitHub-Pages-Version hält sie danach auch offline vor. Fehlt eine Datei, spielt das Instrument mit dem einfachen eingebauten Synthesizer.
+
+Neu erzeugen (braucht ffmpeg):
+
+```sh
+node scripts/build-sounds.mjs /pfad/zu/FluidR3Mono_GM.sf3
+```
 
 ## Installation
 

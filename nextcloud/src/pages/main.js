@@ -75,6 +75,7 @@ async function start() {
 		settings,
 		pdfjs,
 		fontUrl: 'fonts/Leland.otf',
+		soundUrl: name => 'sounds/' + name + '.wav',
 		version: __VERSION__,
 		intro: 'Öffne Noten (PDF oder MuseScore) von deinem Gerät oder wähle einen Ordner mit Noten. Die Dateien bleiben auf deinem Gerät und werden nirgends hochgeladen.',
 		pickFile,

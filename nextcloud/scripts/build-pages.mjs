@@ -25,13 +25,14 @@ await build({
 cpSync(join(root, 'node_modules/pdfjs-dist/build/pdf.worker.min.mjs'), join(out, 'js/pdf.worker.js'))
 cpSync(join(root, 'css/notenleser.css'), join(out, 'css/notenleser.css'))
 cpSync(join(root, 'fonts'), join(out, 'fonts'), { recursive: true })
+cpSync(join(root, 'sounds'), join(out, 'sounds'), { recursive: true })
 for (const icon of ['icon-180.png', 'icon-192.png', 'icon-512.png']) cpSync(join(root, 'img', icon), join(out, 'img', icon))
 for (const file of ['index.html', 'manifest.webmanifest']) cpSync(join(root, 'pages', file), join(out, file))
 cpSync(join(root, 'pages/demo'), join(out, 'demo'), { recursive: true })
 writeFileSync(join(out, '.nojekyll'), '')
 for (const file of ['LICENSE', 'THIRD-PARTY-NOTICES.md', 'LICENSES']) cpSync(join(root, '..', file), join(out, file), { recursive: true })
 
-// The service worker caches every app file except the examples, which are fetched on demand.
+// The service worker caches every app file except the examples and instruments, which are fetched on demand.
 const files = []
 const walk = dir => {
 	for (const name of readdirSync(dir)) {
@@ -41,7 +42,7 @@ const walk = dir => {
 	}
 }
 walk(out)
-const cached = ['./', ...files.filter(f => !f.startsWith('demo/') && !f.startsWith('.') && !f.startsWith('LICENSE') && !f.startsWith('THIRD-PARTY') && f !== 'index.html')]
+const cached = ['./', ...files.filter(f => !f.startsWith('demo/') && !f.startsWith('sounds/') && !f.startsWith('.') && !f.startsWith('LICENSE') && !f.startsWith('THIRD-PARTY') && f !== 'index.html')]
 const worker = readFileSync(join(root, 'pages/sw.js'), 'utf8')
 	.replace('__BUILD__', version + '-' + Date.now().toString(36))
 	.replace('__FILES__', JSON.stringify(cached))

@@ -5,6 +5,7 @@ import { PdfDocument } from '../core/pdfDocument.js'
 import { ScoreNavigator } from '../core/navigator.js'
 import { scoreParts } from '../core/performance.js'
 import { AudioPlayer } from './audioPlayer.js'
+import { SoundBank } from './soundBank.js'
 import { CameraGestures, drawGestureDebug } from './cameraGestures.js'
 import { button, el, FileBrowser, showPartsDialog, showSettingsDialog } from './ui.js'
 
@@ -30,11 +31,12 @@ export function sidecarName(fileName) {
  *   settings: settings store (load, save)
  *   pdfjs:    the pdf.js module
  *   fontUrl:  URL of the Leland music font
+ *   soundUrl: address of a sampled instrument by name (optional; without it playback is synthesized)
  *   version:  app version shown on the start page and in the settings
  */
 export class Reader {
 	constructor(root, {
-		source, settings, pdfjs, fontUrl, version, onFileChange, bare = false, bareUrl = null, homeUrl = null,
+		source, settings, pdfjs, fontUrl, soundUrl = null, version, onFileChange, bare = false, bareUrl = null, homeUrl = null,
 		pickFile = null, pickFolder = null, onContinue = null, intro = null, startActions = [],
 	}) {
 		this.root = root
@@ -43,6 +45,7 @@ export class Reader {
 		this.settings = settings.load()
 		this.pdfjs = pdfjs
 		this.fontUrl = fontUrl
+		this.soundBank = soundUrl ? new SoundBank(soundUrl) : null
 		this.version = version
 		this.onFileChange = onFileChange || (() => {})
 		// Header-less mode (bare) and how to get there or back, for browsers without a fullscreen mode.
@@ -501,7 +504,8 @@ export class Reader {
 			this.nav.twoSystemsMinimum = this.settings.twoSystemsMinimum
 			this.updateViewport()
 			if (startAtEnd) await this.nav.goToEnd()
-			this.player = doc.kind === 'musescore' ? new AudioPlayer(doc.score) : null
+			this.player = doc.kind === 'musescore' ? new AudioPlayer(doc.score, this.soundBank) : null
+			if (this.player) this.player.onLoading = () => this.showBanner('Instrumente werden geladen …', true)
 			this.updateToolButtons()
 			this.showControls()
 			await this.render()
@@ -1086,9 +1090,13 @@ export class Reader {
 		try {
 			await this.player.start(Math.max(0, startTick), this.settings.playbackSpeed / 100, () => this.stopPlayback(), this.range, this.mix)
 		} catch (e) {
+			this.hideBanner()
 			this.toast('Wiedergabe nicht möglich: ' + e.message, true)
 			return
 		}
+		// Loading the instruments may have taken a moment; the player could have been stopped meanwhile.
+		if (this.banner.textContent.startsWith('Instrumente')) this.hideBanner()
+		if (!this.player || !this.player.playing) return
 		this.cursorPage = -1; this.cursorSystem = -1
 		this.updatePlayButton()
 		this.hideControls()

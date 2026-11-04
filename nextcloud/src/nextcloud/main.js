@@ -15,6 +15,7 @@ function start() {
 		settings: new NextcloudSettingsStore(),
 		pdfjs,
 		fontUrl: generateFilePath('notenleser', 'fonts', 'Leland.otf'),
+		soundUrl: name => generateFilePath('notenleser', 'sounds', name + '.wav'),
 		version: loadState('notenleser', 'version', ''),
 		bare: loadState('notenleser', 'bare', false),
 		bareUrl: path => generateUrl('/apps/notenleser/reader') + (path ? '?file=' + encodeURIComponent(path) : ''),

@@ -10,6 +10,7 @@ const reader = new Reader(document.getElementById('notenleser'), {
 	settings: new LocalSettingsStore(DEFAULT_SETTINGS),
 	pdfjs,
 	fontUrl: 'fonts/Leland.otf',
+	soundUrl: name => 'sounds/' + name + '.wav',
 	version: 'dev',
 	// ?bare=1 hides nothing here, but lets the header-less mode and its way back be tried out.
 	bare: new URL(location.href).searchParams.get('bare') === '1',

@@ -12,6 +12,7 @@ Folgende Bestandteile Dritter werden mitgeliefert oder in die gebauten Dateien e
 | @nextcloud/files | 4.1.1 | AGPL-3.0-or-later | Nextcloud | https://github.com/nextcloud-libraries/nextcloud-files |
 | semver | 7.8.6 | ISC | Nextcloud | https://github.com/npm/node-semver |
 | typescript-event-target | 1.1.2 | MIT | Nextcloud | https://github.com/DerZade/typescript-event-target |
+| FluidR3Mono GM (Klänge der Wiedergabe, umgewandelt nach `nextcloud/sounds/`) | 2.312 (2016) | MIT | Web, Nextcloud | https://github.com/musescore/MuseScore/blob/v2.3.2/share/sound/FluidR3Mono_GM.sf3 |
 | Gradle Wrapper (`gradle/wrapper/gradle-wrapper.jar`) | 9.6.0 | Apache-2.0 | Android-Build | https://github.com/gradle/gradle |
 
 Lizenztexte: [Apache-2.0](LICENSES/Apache-2.0.txt), [GPL-3.0](LICENSES/GPL-3.0.txt), [OFL-1.1 (Leland)](LICENSES/OFL-1.1-Leland.txt); MIT und ISC folgen unten.
@@ -90,4 +91,52 @@ ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
 WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
 ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR
 IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+```
+
+## FluidR3Mono GM
+
+Die Instrumentdateien in `nextcloud/sounds/` wurden mit `nextcloud/scripts/build-sounds.mjs` aus
+`FluidR3Mono_GM.sf3` (Version 2.312 vom 5. Dezember 2016, ausgeliefert mit MuseScore 2.3.2) erzeugt:
+neu abgetastet, auf eine Dynamikstufe und Mono reduziert und als IMA ADPCM gespeichert.
+
+```
+Original Stereo version by Frank Wen Copyright (c) 2000-2002
+Mono version by Michael Cowgill Copyright (c) 2014-16
+Temple Blocks instrument provided by Ethan Winer Copyright (c) 2002
+Drumline Percussion provided by Michael Schorsch Copyright (c) 2016
+
+This Mono version of FluidR3 GM is released under the MIT license as described in COPYING.
+
+Fluid (R3) SoundFont
+Copyright (c) 2000-2002, 2008 Frank Wen <getfrank@gmail.com>
+Fluid was constructed in part from samples found in the public domain that I edited/cleaned/remixed/programmed
+and largely from recordings of my own and in conjunction with the people below who helped along the way:
+Suren M. Seron, Scott Hanan, Steve Aupperle, Chris Gillman, Alex Taubr, Chris Prola, Andrew Klenk,
+Winfried Hubbe, Dylan, Tim, Gort, Uros Katic, Ethan Winer (http://www.ethanwiner.com)
+
+COPYING
+
+Mono version:  Copyright (c) 2014-16 Michael Cowgill
+Copyright (c) 2000-2002, 2008 Frank Wen <getfrank@gmail.com>
+
+Permission is hereby granted, free of charge, to any person
+obtaining a copy of this software and associated documentation
+files (the "Software"), to deal in the Software without
+restriction, including without limitation the rights to use,
+copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the
+Software is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
+OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+OTHER DEALINGS IN THE SOFTWARE.
 ```
