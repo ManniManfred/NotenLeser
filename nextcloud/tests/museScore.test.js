@@ -73,6 +73,14 @@ test('engraves pages with systems, staves and a playback cursor', () => {
 	assert.ok(cursor.left < cursor.x && cursor.x < cursor.right)
 	assert.equal(engraver.systemStartTick(0, 0), 0)
 	assert.equal(engraver.systemStartTick(0, 1), score.measures[4].tick)
+	// Tapping into the measure under the cursor finds that measure again.
+	const middle = (cursor.top + cursor.bottom) / 2
+	assert.equal(engraver.measureAt(0, (cursor.left + cursor.right) / 2, middle), 2)
+	assert.equal(engraver.measureAt(0, 0.999, middle), 3)
+	const boxes = engraver.measureBoxes(0, 2, 5)
+	assert.equal(boxes.length, 2)
+	assert.ok(Math.abs(boxes[0].left - cursor.left) < 1e-9)
+	assert.equal(boxes[1].system, 1)
 })
 
 test('unfolds repeats and voltas for playback', () => {
@@ -90,4 +98,18 @@ test('unfolds repeats and voltas for playback', () => {
 	assert.ok(performance.notes.length > 0)
 	assert.ok(performance.notes.every(n => n.end > n.start))
 	assert.equal(performance.notes[0].velocity, 84)
+})
+
+test('limits playback to a range of measures', () => {
+	const score = readMuseScore(mscx, parseXml)
+	const indices = p => p.timeline.map(e => score.measures.indexOf(e.measure))
+	// Inside the repeat the range ends where its last measure is first played.
+	assert.deepEqual(indices(new Performance(score, 1, { first: 1, last: 3 })), [1, 2, 3])
+	// The second volta is reached by the repeat; the measure before the repeat stays out.
+	const voltas = new Performance(score, 1, { first: 2, last: 5 })
+	assert.deepEqual(indices(voltas), [2, 3, 4, 2, 3, 5])
+	assert.equal(Math.round(voltas.durationMs), 6 * 2000)
+	assert.equal(voltas.timeline[0].startMs, 0)
+	assert.ok(voltas.notes.every(n => n.start >= 0 && n.end <= voltas.durationMs + 1))
+	assert.deepEqual(indices(new Performance(score, 1, { first: 9, last: 9 })), [9])
 })

@@ -50,6 +50,12 @@ final class MuseScoreDocument implements ScoreDocument {
 
     int systemStartTick(int page, int system) { return engraver.systemStartTick(page, system); }
 
+    /** See {@link ScoreEngraver#measureAt}. */
+    int measureAt(int page, float x, float y) { return engraver.measureAt(page, x, y); }
+
+    /** See {@link ScoreEngraver#measureBoxes}. */
+    java.util.List<float[]> measureBoxes(int page, int first, int last) { return engraver.measureBoxes(page, first, last); }
+
     /** Draws in staff spaces scaled by k pixels per staff space. */
     private static final class CanvasPainter implements ScorePainter {
         private final Canvas canvas;

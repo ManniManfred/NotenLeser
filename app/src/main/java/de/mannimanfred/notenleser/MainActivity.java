@@ -126,6 +126,12 @@ public class MainActivity extends Activity {
     private ScorePlayer player;
     private PlaybackCursorView cursorView;
     private TextView playButton;
+    private TextView rangeButton;
+    /** Measure indices of the range to play, or -1 when the whole score is played. */
+    private int rangeFirst = -1, rangeLast = -1;
+    /** True while the first and last measure of a range are being tapped; pickedMeasure is the first one, or -1. */
+    private boolean pickingRange;
+    private int pickedMeasure = -1;
     /** Playback tempo in percent of the written tempo. */
     private int playbackSpeed = 100;
     private static final int[] PLAYBACK_SPEEDS = {50, 75, 100, 125};
@@ -268,7 +274,10 @@ public class MainActivity extends Activity {
                     if (dx < 0) next(); else previous();
                 } else if (Math.abs(dy) > Math.max(dp(64), v.getHeight() * .15f) && Math.abs(dy) > Math.abs(dx) * 1.3f) {
                     switchPdf(dy < 0 ? 1 : -1);
-                } else if (Math.abs(dx) < dp(16) && Math.abs(dy) < dp(16)) toggleControls();
+                } else if (Math.abs(dx) < dp(16) && Math.abs(dy) < dp(16)) {
+                    if (pickingRange) pickRangeMeasure(e.getX(), e.getY());
+                    else toggleControls();
+                }
                 return true;
             }
             if (e.getActionMasked() == MotionEvent.ACTION_CANCEL) { multiTouchGesture = false; return true; }
@@ -356,6 +365,8 @@ public class MainActivity extends Activity {
         playButton = button("▶", this::togglePlayback); playButton.setContentDescription("Abspielen");
         playButton.setTextSize(16);
         addTool(tools, playButton);
+        rangeButton = button("Bereich", this::toggleRange);
+        addTool(tools, rangeButton);
         addTool(tools, open); addTool(tools, detectionButton); addTool(tools, editButton); addTool(tools, settings);
         addTool(tools, previousButton); addTool(tools, nextButton);
         addTool(tools, undoEditButton); addTool(tools, undoButton); addTool(tools, clearButton);
@@ -598,6 +609,94 @@ public class MainActivity extends Activity {
         playButton.setText(playing ? "■" : "▶");
         playButton.setContentDescription(playing ? "Wiedergabe beenden" : "Abspielen");
         setButtonAccent(playButton, playing);
+        if (rangeButton == null) return;
+        rangeButton.setVisibility(playButton.getVisibility());
+        boolean hasRange = rangeFirst >= 0;
+        rangeButton.setText(pickingRange ? "Abbrechen" : hasRange ? "Takt " + rangeLabel() : "Bereich");
+        rangeButton.setContentDescription(pickingRange ? "Markieren abbrechen" : hasRange ? "Bereich aufheben" : "Takte zum Abspielen markieren");
+        setButtonAccent(rangeButton, pickingRange || hasRange);
+    }
+
+    private String rangeLabel() {
+        return rangeFirst == rangeLast ? String.valueOf(rangeFirst + 1) : (rangeFirst + 1) + "–" + (rangeLast + 1);
+    }
+
+    /** Starts marking a range to play, cancels marking, or removes the marked range. */
+    private void toggleRange() {
+        if (player == null || editMode) return;
+        if (pickingRange) {
+            pickingRange = false; pickedMeasure = -1;
+            hideBanner();
+        } else if (rangeFirst >= 0) {
+            if (player.isPlaying()) stopPlayback();
+            rangeFirst = -1; rangeLast = -1;
+            Toast.makeText(this, "Bereich aufgehoben – ▶ spielt wieder ab dem obersten System", Toast.LENGTH_SHORT).show();
+        } else {
+            stopPlayback();
+            pickingRange = true; pickedMeasure = -1;
+            showBanner("Ersten Takt des Bereichs antippen", true);
+        }
+        updatePlayButton();
+        renderSystem();
+    }
+
+    /** Takes a tapped measure as the first or last measure of the range; swiping in between turns pages. */
+    private void pickRangeMeasure(float viewX, float viewY) {
+        int measure = measureAtView(viewX, viewY);
+        if (measure < 0) return;
+        if (pickedMeasure < 0) {
+            pickedMeasure = measure;
+            showBanner("Takt " + (measure + 1) + " – jetzt letzten Takt antippen", true);
+            renderSystem();
+            return;
+        }
+        rangeFirst = Math.min(pickedMeasure, measure); rangeLast = Math.max(pickedMeasure, measure);
+        pickingRange = false; pickedMeasure = -1;
+        showBanner("Takt " + rangeLabel() + "\n▶ spielt den Bereich in Schleife", false);
+        updatePlayButton();
+        renderSystem();
+        showControls();
+    }
+
+    /** Measure under a point of the score view, or -1. */
+    private int measureAtView(float viewX, float viewY) {
+        if (!(renderer instanceof MuseScoreDocument) || shownWidth <= 0 || scoreView.getDrawable() == null) return -1;
+        Matrix inverse = new Matrix();
+        if (!scoreView.getImageMatrix().invert(inverse)) return -1;
+        float[] point = {viewX, viewY};
+        inverse.mapPoints(point);
+        if (point[0] < 0 || point[0] > shownWidth) return -1;
+        for (int[] part : shownParts) {
+            if (point[1] < part[3] || point[1] > part[3] + part[2] - part[1]) continue;
+            int page = part[0];
+            float pageY = part[1] + point[1] - part[3];
+            return ((MuseScoreDocument) renderer).measureAt(page, point[0] / shownWidth, pageY / pageBitmapHeight(page, shownWidth));
+        }
+        return -1;
+    }
+
+    /**
+     * Tints the marked measures, or the first measure while a range is being marked, in the part of a page that
+     * is drawn from page pixels sourceTop..sourceBottom to destinationTop.
+     */
+    private void drawRangeHighlight(Canvas canvas, int page, int sourceTop, int sourceBottom, int destinationTop, int width) {
+        if (!(renderer instanceof MuseScoreDocument) || editMode) return;
+        int first = pickingRange ? pickedMeasure : rangeFirst, last = pickingRange ? pickedMeasure : rangeLast;
+        if (first < 0) return;
+        int pageHeight = pageBitmapHeight(page, width);
+        Paint tint = new Paint(Paint.ANTI_ALIAS_FLAG); tint.setColor(Color.rgb(201, 240, 207));
+        tint.setXfermode(new android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.MULTIPLY));
+        Paint frame = new Paint(Paint.ANTI_ALIAS_FLAG); frame.setColor(Color.argb(217, 38, 150, 72));
+        frame.setStyle(Paint.Style.STROKE); frame.setStrokeWidth(Math.max(2f, width / 500f));
+        for (float[] box : ((MuseScoreDocument) renderer).measureBoxes(page, first, last)) {
+            float top = box[3] * pageHeight, bottom = box[4] * pageHeight;
+            float middle = (top + bottom) / 2;
+            if (middle < sourceTop || middle > sourceBottom) continue;
+            RectF rect = new RectF(box[1] * width, Math.max(sourceTop, top) - sourceTop + destinationTop,
+                    box[2] * width, Math.min(sourceBottom, bottom) - sourceTop + destinationTop);
+            canvas.drawRect(rect, tint);
+            canvas.drawRect(rect, frame);
+        }
     }
 
     /** Plays from the first system on screen, or stops a running playback. */
@@ -605,9 +704,10 @@ public class MainActivity extends Activity {
         if (player == null || !(renderer instanceof MuseScoreDocument)) return;
         if (player.isPlaying()) { stopPlayback(); return; }
         MuseScoreDocument score = (MuseScoreDocument) renderer;
+        if (pickingRange) { pickingRange = false; pickedMeasure = -1; hideBanner(); renderSystem(); }
         int startTick = score.systemStartTick(pageIndex, autoDetection ? systemIndex : 0);
         try {
-            player.start(this, Math.max(0, startTick), playbackSpeed / 100f, this::stopPlayback);
+            player.start(this, Math.max(0, startTick), playbackSpeed / 100f, this::stopPlayback, rangeFirst, rangeLast);
         } catch (IOException | RuntimeException e) {
             Toast.makeText(this, "Wiedergabe nicht möglich: " + describeCause(e), Toast.LENGTH_LONG).show();
             return;
@@ -1049,6 +1149,7 @@ public class MainActivity extends Activity {
     private void closePdf() {
         stopPlayback();
         player = null;
+        rangeFirst = -1; rangeLast = -1; pickingRange = false; pickedMeasure = -1;
         if (renderer != null) { renderer.close(); renderer = null; }
     }
 
@@ -1075,7 +1176,10 @@ public class MainActivity extends Activity {
         }
         editMode = !editMode;
         autoDetection = !editMode;
-        if (editMode) stopPlayback();
+        if (editMode) {
+            stopPlayback();
+            if (pickingRange) { pickingRange = false; pickedMeasure = -1; hideBanner(); }
+        }
         zoom = 1f; panX = 0f; panY = 0f;
         updateToolButtons();
         systemIndex = 0;
@@ -1532,7 +1636,10 @@ public class MainActivity extends Activity {
                 shownParts.clear(); shownWidth = width;
                 shownParts.add(new int[]{pageIndex, 0, page.getHeight(), 0});
                 if (editMode) drawManualOverlay(page, pageIndex);
-                else drawPageVoiceHighlight(page, pageIndex);
+                else {
+                    drawPageVoiceHighlight(page, pageIndex);
+                    drawRangeHighlight(new Canvas(page), pageIndex, 0, page.getHeight(), 0, width);
+                }
                 scoreView.setImageBitmap(page);
                 applyImageTransform();
                 return;
@@ -1686,6 +1793,7 @@ public class MainActivity extends Activity {
                 shownParts.add(new int[]{system.page, system.top, system.bottom, y});
                 int[] staff = voiceStaff(system.page, system.top, system.bottom, width);
                 if (staff != null) drawVoiceHighlight(canvas, staff, y - system.top, width, y, y + systemHeight);
+                drawRangeHighlight(canvas, system.page, system.top, system.bottom, y, width);
                 String label = (system.page + 1) + "·" + (system.index + 1);
                 float badgeHeight = dp(17) / displayScale;
                 float badgeWidth = Math.max(dp(27) / displayScale, labelPaint.measureText(label) + dp(8) / displayScale);
@@ -1773,7 +1881,8 @@ public class MainActivity extends Activity {
         int count = currentSystemCount();
         boolean detected = autoDetection && pageIndex < pageSystems.size() && pageSystems.get(pageIndex) != null && pageSystems.get(pageIndex).count() > 0;
         String visible = visibleSystemCount > 1 ? separator + visibleSystemCount + " im Bild" : "";
-        info.setText(pagePosition + filePosition + separator + "System " + (systemIndex + 1) + "/" + count + visible + (detected ? "" : " (Fallback)"));
+        String range = rangeFirst >= 0 ? separator + "Bereich: Takt " + rangeLabel() : "";
+        info.setText(pagePosition + filePosition + separator + "System " + (systemIndex + 1) + "/" + count + visible + (detected ? "" : " (Fallback)") + range);
     }
 
     /**

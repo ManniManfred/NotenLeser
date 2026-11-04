@@ -778,6 +778,46 @@ export class ScoreEngraver {
 		return null
 	}
 
+	/**
+	 * Index of the measure at a point of a page (ratios of page width and height), or -1 when the page has no
+	 * systems. Points beside a system pick its nearest measure, points between systems the nearest system.
+	 */
+	measureAt(pageIndex, xRatio, yRatio) {
+		if (pageIndex < 0 || pageIndex >= this.pages.length) return -1
+		const page = this.pages[pageIndex]
+		const x = xRatio * this.pageWidth, y = yRatio * this.pageHeight
+		let best = null, bestDistance = Infinity
+		page.systems.forEach((system, i) => {
+			const top = page.y[i] + system.staffY[0], bottom = page.y[i] + system.staffY[this.staffCount - 1] + 4
+			const distance = y < top ? top - y : y > bottom ? y - bottom : 0
+			if (distance < bestDistance) { bestDistance = distance; best = system }
+		})
+		if (best === null) return -1
+		for (const p of best.measures) if (x < p.end()) return p.index
+		return best.measures[best.measures.length - 1].index
+	}
+
+	/**
+	 * Areas of the measures first..last on a page as [{system, left, right, top, bottom}], one per system;
+	 * values are ratios like in cursorAt.
+	 */
+	measureBoxes(pageIndex, first, last) {
+		const boxes = []
+		if (pageIndex < 0 || pageIndex >= this.pages.length) return boxes
+		const page = this.pages[pageIndex]
+		page.systems.forEach((system, i) => {
+			const inside = system.measures.filter(p => p.index >= first && p.index <= last)
+			if (inside.length === 0) return
+			const y = page.y[i]
+			const top = y + system.staffY[0] - 1.5, bottom = y + system.staffY[this.staffCount - 1] + 5.5
+			boxes.push({
+				system: i, left: inside[0].x / this.pageWidth, right: inside[inside.length - 1].end() / this.pageWidth,
+				top: Math.max(0, top / this.pageHeight), bottom: Math.min(1, bottom / this.pageHeight),
+			})
+		})
+		return boxes
+	}
+
 	/** First tick of a system, or -1 if the page has no such system. */
 	systemStartTick(pageIndex, systemIndex) {
 		if (pageIndex < 0 || pageIndex >= this.pages.length) return -1

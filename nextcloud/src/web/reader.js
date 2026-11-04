@@ -71,6 +71,8 @@ export class Reader {
 		this.zoom = 1; this.panX = 0; this.panY = 0
 		this.shownParts = []
 		this.player = null
+		this.range = null // {first, last} measure indices to play
+		this.rangeFirst = null // first measure picked while marking a range, -1 before it is picked
 		this.cursorPage = -1; this.cursorSystem = -1
 		this.queue = Promise.resolve()
 		this.pointers = new Map()
@@ -95,6 +97,7 @@ export class Reader {
 		this.titleView = el('div', { class: 'nl-title' })
 		this.info = el('div', { class: 'nl-info' })
 		this.playButton = button('▶', () => this.togglePlayback(), 'Abspielen')
+		this.rangeButton = button('Bereich', () => this.toggleRange(), 'Takte zum Abspielen markieren')
 		this.detectionButton = button('System', () => this.toggleDetection())
 		this.editButton = button('Bearbeiten', () => this.toggleEditMode())
 		this.previousButton = button('‹', () => this.run(() => this.previous()), 'Vorherige Seite')
@@ -104,7 +107,7 @@ export class Reader {
 		this.clearButton = button('×', () => this.clearManualSystems(), 'Systeme dieser Seite löschen')
 		this.fullscreenButton = button('⛶', () => this.toggleFullscreen(), 'Vollbild')
 		const tools = el('div', { class: 'nl-tools' }, [
-			this.playButton,
+			this.playButton, this.rangeButton,
 			button('Öffnen', () => this.chooseFile()),
 			this.detectionButton, this.editButton,
 			button('⚙', () => this.showSettings(), 'Einstellungen'),
@@ -164,6 +167,10 @@ export class Reader {
 		this.playButton.textContent = playing ? '■' : '▶'
 		this.playButton.title = playing ? 'Wiedergabe beenden' : 'Abspielen'
 		this.playButton.classList.toggle('nl-accent', playing)
+		this.rangeButton.hidden = this.playButton.hidden
+		this.rangeButton.classList.toggle('nl-accent', !!this.range || this.rangeFirst !== null)
+		this.rangeButton.textContent = this.rangeFirst !== null ? 'Abbrechen' : this.range ? 'Takt ' + rangeLabel(this.range) : 'Bereich'
+		this.rangeButton.title = this.rangeFirst !== null ? 'Markieren abbrechen' : this.range ? 'Bereich aufheben' : 'Takte zum Abspielen markieren'
 	}
 
 	refreshInfo() {
@@ -183,7 +190,8 @@ export class Reader {
 		const known = nav.knownSystemCount(nav.page)
 		const count = known ? known : 4
 		const visible = nav.visible.length > 1 ? `${separator}${nav.visible.length} im Bild` : ''
-		this.info.textContent = `${pagePosition}${filePosition}${separator}System ${nav.system + 1}/${count}${visible}${known ? '' : ' (Fallback)'}`
+		const range = this.range ? `${separator}Bereich: Takt ${rangeLabel(this.range)}` : ''
+		this.info.textContent = `${pagePosition}${filePosition}${separator}System ${nav.system + 1}/${count}${visible}${known ? '' : ' (Fallback)'}${range}`
 	}
 
 	showControls() {
@@ -342,7 +350,10 @@ export class Reader {
 			this.run(() => (dx < 0 ? this.next() : this.previous()))
 		} else if (Math.abs(dy) > Math.max(64, height * 0.15) && Math.abs(dy) > Math.abs(dx) * 1.3) {
 			this.switchFile(dy < 0 ? 1 : -1)
-		} else if (tap) this.toggleControls()
+		} else if (tap) {
+			if (this.rangeFirst !== null) this.pickRangeMeasure(point)
+			else this.toggleControls()
+		}
 	}
 
 	onWheel(e) {
@@ -539,6 +550,8 @@ export class Reader {
 		try { if (this.doc) this.doc.close() } catch (e) { console.warn(e) }
 		this.doc = null
 		this.nav = null
+		this.range = null
+		this.rangeFirst = null
 		this.pageCache.clear()
 	}
 
@@ -692,6 +705,7 @@ export class Reader {
 		if (!this.doc || !this.frame) return
 		if (this.nav.autoDetection) this.drawSystems()
 		else this.drawPage()
+		this.drawRange()
 		this.updatePlaybackCursor(false)
 	}
 
@@ -914,7 +928,7 @@ export class Reader {
 		if (!this.doc) { this.toast('Bitte zuerst Noten öffnen'); return }
 		this.editMode = !this.editMode
 		this.nav.autoDetection = !this.editMode
-		if (this.editMode) this.stopPlayback()
+		if (this.editMode) { this.stopPlayback(); this.rangeFirst = null; this.hideBanner() }
 		this.zoom = 1; this.panX = 0; this.panY = 0
 		this.selected = null
 		this.nav.system = 0
@@ -1060,9 +1074,10 @@ export class Reader {
 	async togglePlayback() {
 		if (!this.player || this.doc.kind !== 'musescore') return
 		if (this.player.playing) { this.stopPlayback(); return }
+		if (this.rangeFirst !== null) this.cancelRangeSelection()
 		const startTick = this.doc.systemStartTick(this.nav.page, this.nav.autoDetection ? this.nav.system : 0)
 		try {
-			await this.player.start(Math.max(0, startTick), this.settings.playbackSpeed / 100, () => this.stopPlayback())
+			await this.player.start(Math.max(0, startTick), this.settings.playbackSpeed / 100, () => this.stopPlayback(), this.range)
 		} catch (e) {
 			this.toast('Wiedergabe nicht möglich: ' + e.message, true)
 			return
@@ -1076,6 +1091,87 @@ export class Reader {
 			this.cursorFrame = requestAnimationFrame(tick)
 		}
 		this.cursorFrame = requestAnimationFrame(tick)
+	}
+
+	// ---- playback range -----------------------------------------------------------------------------------
+
+	/** Starts marking a range, cancels marking, or removes the marked range. */
+	toggleRange() {
+		if (!this.player || this.editMode) return
+		if (this.rangeFirst !== null) { this.cancelRangeSelection(); return }
+		if (this.range) {
+			if (this.player.playing) this.stopPlayback()
+			this.range = null
+			this.toast('Bereich aufgehoben – ▶ spielt wieder ab dem obersten System')
+			this.afterRangeChange()
+			return
+		}
+		this.stopPlayback()
+		this.rangeFirst = -1
+		this.showBanner('Ersten Takt des Bereichs antippen', true)
+		this.afterRangeChange()
+	}
+
+	cancelRangeSelection() {
+		this.rangeFirst = null
+		this.hideBanner()
+		this.afterRangeChange()
+	}
+
+	afterRangeChange() {
+		this.updatePlayButton()
+		this.refreshInfo()
+		this.draw()
+	}
+
+	/** Measure under a point of the canvas, or -1. */
+	measureAtPoint(point) {
+		const part = this.shownParts.find(p => point.x >= p.x && point.x <= p.x + p.width && point.y >= p.y && point.y <= p.y + p.height)
+		if (!part || !this.doc.measureAt) return -1
+		const yRatio = part.top + (point.y - part.y) / part.height * (part.bottom - part.top)
+		return this.doc.measureAt(part.page, (point.x - part.x) / part.width, yRatio)
+	}
+
+	/** Takes a tapped measure as the first or last measure of the range; swiping in between turns pages. */
+	pickRangeMeasure(point) {
+		const measure = this.measureAtPoint(point)
+		if (measure < 0) return
+		if (this.rangeFirst < 0) {
+			this.rangeFirst = measure
+			this.showBanner(`Takt ${measure + 1} – jetzt letzten Takt antippen`, true)
+			this.draw()
+			return
+		}
+		this.range = { first: Math.min(this.rangeFirst, measure), last: Math.max(this.rangeFirst, measure) }
+		this.rangeFirst = null
+		this.showBanner(`Takt ${rangeLabel(this.range)}\n▶ spielt den Bereich in Schleife`)
+		this.afterRangeChange()
+		this.showControls()
+	}
+
+	/** Tints the marked measures, or the first measure while a range is being marked. */
+	drawRange() {
+		const range = this.rangeFirst !== null && this.rangeFirst >= 0 ? { first: this.rangeFirst, last: this.rangeFirst } : this.range
+		if (!range || !this.doc.measureBoxes || this.editMode) return
+		const c = this.canvas.getContext('2d')
+		for (const part of this.shownParts) {
+			for (const box of this.doc.measureBoxes(part.page, range.first, range.last)) {
+				const middle = (box.top + box.bottom) / 2
+				if (middle < part.top || middle > part.bottom) continue
+				const scaleY = part.height / (part.bottom - part.top)
+				const top = part.y + (Math.max(part.top, box.top) - part.top) * scaleY
+				const bottom = part.y + (Math.min(part.bottom, box.bottom) - part.top) * scaleY
+				const left = part.x + box.left * part.width, right = part.x + box.right * part.width
+				c.save()
+				c.globalCompositeOperation = 'multiply'
+				c.fillStyle = '#c9f0cf'
+				c.fillRect(left, top, right - left, bottom - top)
+				c.restore()
+				c.strokeStyle = 'rgba(38,150,72,.85)'
+				c.lineWidth = 2
+				c.strokeRect(left, top, right - left, bottom - top)
+			}
+		}
 	}
 
 	stopPlayback() {
@@ -1185,6 +1281,10 @@ function pedalDirection(key) {
 	default:
 		return 0
 	}
+}
+
+function rangeLabel(range) {
+	return range.first === range.last ? `${range.first + 1}` : `${range.first + 1}–${range.last + 1}`
 }
 
 function startAction(label, primary, action) {

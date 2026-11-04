@@ -37,6 +37,8 @@ export class MuseScoreDocument {
 	staffRatios(page) { return this.engraver.staffRatios(page) }
 	cursorAt(tick) { return this.engraver.cursorAt(tick) }
 	systemStartTick(page, system) { return this.engraver.systemStartTick(page, system) }
+	measureAt(page, x, y) { return this.engraver.measureAt(page, x, y) }
+	measureBoxes(page, first, last) { return this.engraver.measureBoxes(page, first, last) }
 	close() {}
 }
 

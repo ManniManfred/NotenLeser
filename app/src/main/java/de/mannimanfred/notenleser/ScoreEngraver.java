@@ -906,6 +906,52 @@ final class ScoreEngraver {
         return null;
     }
 
+    /**
+     * Index of the measure at a point of a page (ratios of page width and height), or -1 when the page has no
+     * systems. Points beside a system pick its nearest measure, points between systems the nearest system.
+     */
+    int measureAt(int pageIndex, float xRatio, float yRatio) {
+        if (pageIndex < 0 || pageIndex >= pages.size()) return -1;
+        PageLayout page = pages.get(pageIndex);
+        float x = xRatio * pageWidth, y = yRatio * pageHeight;
+        SystemLayout best = null;
+        float bestDistance = Float.MAX_VALUE;
+        for (int i = 0; i < page.systems.size(); i++) {
+            SystemLayout system = page.systems.get(i);
+            float top = page.y.get(i) + system.staffY[0], bottom = page.y.get(i) + system.staffY[staffCount - 1] + 4;
+            float distance = y < top ? top - y : y > bottom ? y - bottom : 0;
+            if (distance < bestDistance) { bestDistance = distance; best = system; }
+        }
+        if (best == null || best.measures.isEmpty()) return -1;
+        for (MeasurePlacement placement : best.measures) if (x < placement.end()) return placement.index;
+        return best.measures.get(best.measures.size() - 1).index;
+    }
+
+    /**
+     * Areas of the measures first..last on a page, one per system, as {system index, left, right, top, bottom};
+     * values are ratios like in {@link #cursorAt}.
+     */
+    List<float[]> measureBoxes(int pageIndex, int first, int last) {
+        List<float[]> boxes = new ArrayList<>();
+        if (pageIndex < 0 || pageIndex >= pages.size()) return boxes;
+        PageLayout page = pages.get(pageIndex);
+        for (int i = 0; i < page.systems.size(); i++) {
+            SystemLayout system = page.systems.get(i);
+            MeasurePlacement from = null, to = null;
+            for (MeasurePlacement placement : system.measures) {
+                if (placement.index < first || placement.index > last) continue;
+                if (from == null) from = placement;
+                to = placement;
+            }
+            if (from == null) continue;
+            float y = page.y.get(i);
+            float top = y + system.staffY[0] - 1.5f, bottom = y + system.staffY[staffCount - 1] + 5.5f;
+            boxes.add(new float[]{i, from.x / pageWidth, to.end() / pageWidth,
+                    Math.max(0, top / pageHeight), Math.min(1, bottom / pageHeight)});
+        }
+        return boxes;
+    }
+
     /** First tick of a system, or -1 if the page has no such system. */
     int systemStartTick(int pageIndex, int systemIndex) {
         if (pageIndex < 0 || pageIndex >= pages.size()) return -1;

@@ -44,11 +44,18 @@ export class AudioPlayer {
 
 	get playing() { return this.timer !== null }
 
-	/** Starts at a score tick with a tempo factor; onEnd runs when the score has finished. */
-	async start(startTick, speed, onEnd) {
+	/**
+	 * Starts at a score tick with a tempo factor; onEnd runs when the score has finished. With a range
+	 * {first, last} of measure indices only these measures are played, over and over until stopped.
+	 */
+	async start(startTick, speed, onEnd, range = null) {
 		this.stop()
-		if (!this.performance || this.performance.speed !== speed) this.performance = new Performance(this.score, speed)
-		if (this.performance.notes.length === 0) throw new Error('Die Partitur enthält nichts zum Abspielen')
+		const sameRange = (a, b) => (!a && !b) || (a && b && a.first === b.first && a.last === b.last)
+		if (!this.performance || this.performance.speed !== speed || !sameRange(this.performance.range, range)) {
+			this.performance = new Performance(this.score, speed, range)
+		}
+		if (this.performance.notes.length === 0) throw new Error(range ? 'Der Bereich enthält nichts zum Abspielen' : 'Die Partitur enthält nichts zum Abspielen')
+		this.loop = !!range
 		if (!this.context) {
 			const AudioContextClass = window.AudioContext || window.webkitAudioContext
 			if (!AudioContextClass) throw new Error('Der Browser unterstützt keine Audiowiedergabe')
@@ -61,8 +68,10 @@ export class AudioPlayer {
 		}
 		await this.context.resume()
 		this.onEnd = onEnd
-		this.offsetMs = this.performance.msAtTick(Math.max(0, startTick))
+		this.offsetMs = this.loop ? 0 : this.performance.msAtTick(Math.max(0, startTick))
 		this.startTime = this.context.currentTime + 0.1
+		// A loop pass starts at cycleTime; the next pass is scheduled once all notes of this one are.
+		this.cycleTime = this.startTime
 		this.nextNote = this.performance.notes.findIndex(note => note.start >= this.offsetMs - 1)
 		if (this.nextNote < 0) this.nextNote = this.performance.notes.length
 		this.timer = setInterval(() => this.schedule(), TICK_MS)
@@ -83,8 +92,12 @@ export class AudioPlayer {
 		this.nodes.clear()
 	}
 
-	/** Playback position in ms of the unfolded score. */
-	positionMs() { return this.offsetMs + (this.context.currentTime - this.startTime) * 1000 }
+	/** Playback position in ms of the unfolded score; a looped range starts again at 0 on every pass. */
+	positionMs() {
+		const elapsed = (this.context.currentTime - this.startTime) * 1000
+		if (!this.loop || elapsed < 0) return this.offsetMs + elapsed
+		return elapsed % Math.max(1, this.performance.durationMs)
+	}
 
 	/** Score tick currently sounding, or -1 when not playing. */
 	currentTick() {
@@ -95,24 +108,32 @@ export class AudioPlayer {
 
 	schedule() {
 		const notes = this.performance.notes
-		const position = this.positionMs()
-		if (position > this.performance.durationMs + 300) {
+		if (!this.loop && this.positionMs() > this.performance.durationMs + 300) {
 			const onEnd = this.onEnd
 			this.stop()
 			if (onEnd) onEnd()
 			return
 		}
-		while (this.nextNote < notes.length && notes[this.nextNote].start < position + LOOKAHEAD_MS) {
-			this.play(notes[this.nextNote++])
+		const horizon = this.context.currentTime + LOOKAHEAD_MS / 1000
+		for (;;) {
+			if (this.nextNote >= notes.length) {
+				if (!this.loop) break
+				this.cycleTime += this.performance.durationMs / 1000
+				this.nextNote = 0
+			}
+			const note = notes[this.nextNote]
+			if (this.timeOf(note.start) >= horizon) break
+			this.play(note)
+			this.nextNote++
 		}
 	}
 
-	timeOf(ms) { return this.startTime + (ms - this.offsetMs) / 1000 }
+	timeOf(ms) { return this.cycleTime + (ms - this.offsetMs) / 1000 }
 
 	play(note) {
 		const ctx = this.context
 		const start = Math.max(ctx.currentTime, this.timeOf(note.start))
-		const end = Math.max(start + 0.02, this.timeOf(note.end))
+		const end = Math.max(start + 0.02, this.timeOf(this.loop ? Math.min(note.end, this.performance.durationMs) : note.end))
 		const level = (note.velocity / 127) ** 1.5 * 0.22
 		const gain = ctx.createGain()
 		gain.gain.value = 0

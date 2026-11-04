@@ -3,18 +3,22 @@ import { Annotation, SpannerKind } from './musicModel.js'
 /**
  * Turns a score into timed note events for playback. Repeats and voltas are unfolded; times are milliseconds
  * from the start of the score at the given tempo factor (1 = as written).
+ * An optional range {first, last} of measure indices limits playback to these measures: it runs from the first
+ * time the first measure is played until the last measure is played, leaving out measures outside the range
+ * (e.g. the start of a repeat that lies before it).
  */
 const DEFAULT_TEMPO = 120
 
 export class Performance {
-	constructor(score, speed = 1) {
+	constructor(score, speed = 1, range = null) {
 		this.score = score
 		this.speed = Math.max(0.25, Math.min(2, speed))
+		this.range = range
 		const entries = [...score.tempos.entries()].sort((a, b) => a[0] - b[0])
 		if (entries.length === 0 || entries[0][0] > 0) entries.unshift([0, entries.length === 0 ? DEFAULT_TEMPO : entries[0][1]])
 		this.tempoTicks = entries.map(e => e[0])
 		this.tempoValues = entries.map(e => e[1])
-		this.timeline = this.unfold()
+		this.timeline = range ? this.limit(this.unfold(), range) : this.unfold()
 		this.notes = this.buildNotes()
 	}
 
@@ -125,6 +129,24 @@ export class Performance {
 				repeatStart = i + 1
 			}
 			i++
+		}
+		return result
+	}
+
+	/** Keeps the played measures of a range and lays them out one after the other. */
+	limit(timeline, { first, last }) {
+		const index = new Map(this.score.measures.map((m, i) => [m, i]))
+		const begin = timeline.findIndex(p => index.get(p.measure) === first)
+		if (begin < 0) return []
+		const result = []
+		let ms = 0
+		for (let i = begin; i < timeline.length; i++) {
+			const m = timeline[i].measure, at = index.get(m)
+			if (at < first || at > last) continue
+			const length = timeline[i].endMs - timeline[i].startMs
+			result.push({ measure: m, startMs: ms, endMs: ms + length })
+			ms += length
+			if (at === last) break
 		}
 		return result
 	}

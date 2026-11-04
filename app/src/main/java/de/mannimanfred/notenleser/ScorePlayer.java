@@ -66,17 +66,28 @@ final class ScorePlayer {
 
     /** Starts playing at a score tick with a tempo factor (1 = as written); onEnd runs on the main thread. */
     void start(Context context, int startTick, float speed, Runnable onEnd) throws IOException {
+        start(context, startTick, speed, onEnd, -1, -1);
+    }
+
+    /**
+     * Like {@link #start(Context, int, float, Runnable)}; with a range of measure indices (first ≥ 0) only these
+     * measures are played, over and over until stopped. The range runs from the first time its first measure is
+     * played until its last measure is played and leaves out measures outside it.
+     */
+    void start(Context context, int startTick, float speed, Runnable onEnd, int first, int last) throws IOException {
         stop();
         this.speed = Math.max(.25f, Math.min(2f, speed));
-        timeline = unfold();
-        if (timeline.isEmpty()) throw new IOException("Die Partitur enthält nichts zum Abspielen");
+        boolean loop = first >= 0;
+        timeline = loop ? limit(unfold(), first, last) : unfold();
+        if (timeline.isEmpty()) throw new IOException(loop ? "Der Bereich enthält nichts zum Abspielen" : "Die Partitur enthält nichts zum Abspielen");
+        if (loop) startTick = timeline.get(0).measure.tick;
         double startMs = 0;
         for (Played played : timeline) {
             Measure m = played.measure;
             if (startTick >= m.tick && startTick < m.tick + m.ticks) { startMs = msAt(played, startTick); break; }
         }
         offsetMs = startMs;
-        byte[] midi = buildMidi(startMs);
+        byte[] midi = buildMidi(startMs, loop);
         midiFile = new File(context.getCacheDir(), "notenleser_playback.mid");
         try (FileOutputStream output = new FileOutputStream(midiFile)) { output.write(midi); }
         MediaPlayer player = new MediaPlayer();
@@ -87,6 +98,7 @@ final class ScorePlayer {
             player.release();
             throw e instanceof IOException ? (IOException) e : new IOException(e.getMessage(), e);
         }
+        player.setLooping(loop);
         player.setOnCompletionListener(p -> { stop(); if (onEnd != null) onEnd.run(); });
         mediaPlayer = player;
         player.start();
@@ -202,6 +214,26 @@ final class ScorePlayer {
         return result;
     }
 
+    /** Keeps the played measures of a range and lays them out one after the other. */
+    private List<Played> limit(List<Played> unfolded, int first, int last) {
+        Map<Measure, Integer> index = new HashMap<>();
+        for (int i = 0; i < score.measures.size(); i++) index.put(score.measures.get(i), i);
+        List<Played> result = new ArrayList<>();
+        boolean started = false;
+        double ms = 0;
+        for (Played played : unfolded) {
+            int at = index.get(played.measure);
+            if (!started && at != first) continue;
+            started = true;
+            if (at < first || at > last) continue;
+            double length = played.endMs - played.startMs;
+            result.add(new Played(played.measure, ms, ms + length));
+            ms += length;
+            if (at == last) break;
+        }
+        return result;
+    }
+
     // ---- MIDI -------------------------------------------------------------------------------------------------
 
     private static int velocity(String dynamic) {
@@ -221,7 +253,8 @@ final class ScorePlayer {
         }
     }
 
-    private byte[] buildMidi(double startMs) {
+    /** A looped MIDI file ends exactly at the end of the timeline so the next pass follows without a gap. */
+    private byte[] buildMidi(double startMs, boolean loop) {
         int staffCount = score.staves.size();
         int[] channels = new int[staffCount];
         Map<Integer, Integer> partChannels = new HashMap<>();
@@ -293,9 +326,11 @@ final class ScorePlayer {
 
         // Raw events: {time ms, order, status, data1, data2}; note-offs sort before note-ons at the same time.
         List<int[]> events = new ArrayList<>();
+        int endTime = (int) Math.round(timeline.get(timeline.size() - 1).endMs - startMs);
         for (NoteEvent note : notes) {
             if (note.start < startMs - 1) continue;
             int on = (int) Math.round(note.start - startMs), off = (int) Math.round(note.end - startMs);
+            if (loop) { if (on >= endTime) continue; off = Math.min(off, endTime); }
             events.add(new int[]{on, 1, 0x90 | note.channel, note.pitch, note.velocity});
             events.add(new int[]{Math.max(on + 1, off), 0, 0x80 | note.channel, note.pitch, 0});
         }
@@ -314,7 +349,7 @@ final class ScorePlayer {
             writeVarLen(track, event[0] - time); time = event[0];
             track.write(event[2]); track.write(event[3]); track.write(event[4]);
         }
-        writeVarLen(track, 200); track.write(0xFF); track.write(0x2F); track.write(0);
+        writeVarLen(track, loop ? Math.max(0, endTime - time) : 200); track.write(0xFF); track.write(0x2F); track.write(0);
 
         byte[] trackBytes = track.toByteArray();
         ByteArrayOutputStream file = new ByteArrayOutputStream();
