@@ -23,7 +23,7 @@ Die Kamerabilder werden nur im Browser zu einem groben Helligkeitsraster verrech
 Dieselbe Oberfläche läuft auch als reine Web-App ohne Server: **https://mannimanfred.github.io/NotenLeser/**
 
 - „Noten öffnen“ wählt eine oder mehrere Dateien vom Gerät (auch auf dem iPhone); die gewählten Dateien bilden die Mappe zum Wischen nach oben/unten.
-- „Ordner öffnen“ öffnet einen ganzen Notenordner. In Chrome und Edge bleibt der Ordner gespeichert („Weiterlesen“ nach dem Neustart), und markierte Systeme werden als `.systems.json` direkt in den Ordner geschrieben – kompatibel mit der Nextcloud-Version. In anderen Browsern werden Markierungen im Browser gespeichert.
+- „Ordner öffnen“ öffnet einen ganzen Notenordner. In Chrome und Edge bleibt der Ordner gespeichert („Weiterlesen“ nach dem Neustart), und markierte Systeme werden als `.systems.json` direkt in den Ordner geschrieben – kompatibel mit der Nextcloud-Version. In anderen Browsern werden Markierungen im Browser gespeichert. Auf Handys und Tablets (Android, iPhone, iPad) können Browser keine Ordner auswählen; dort heißt die Taste „Mehrere Noten öffnen“, und man markiert alle Noten des Ordners auf einmal.
 - „Beispiel ansehen“ lädt eine Beispiel-PDF und eine MuseScore-Datei.
 - Die Dateien bleiben auf dem Gerät, es wird nichts hochgeladen. Nach dem ersten Besuch funktioniert die App auch offline und lässt sich installieren bzw. zum Home-Bildschirm hinzufügen; installiert kann sie in Chrome/Edge als Programm zum Öffnen von PDF- und MuseScore-Dateien gewählt werden.
 

@@ -37,7 +37,7 @@ export function sidecarName(fileName) {
 export class Reader {
 	constructor(root, {
 		source, settings, pdfjs, fontUrl, soundUrl = null, version, onFileChange, bare = false, bareUrl = null, homeUrl = null,
-		pickFile = null, pickFolder = null, onContinue = null, intro = null, startActions = [],
+		pickFile = null, pickFolder = null, folderLabel = 'Ordner öffnen', onContinue = null, intro = null, startActions = [],
 	}) {
 		this.root = root
 		this.source = source
@@ -55,6 +55,7 @@ export class Reader {
 		// Optional replacements for the built-in file browser, e.g. the device's own file picker.
 		this.pickFile = pickFile
 		this.pickFolder = pickFolder
+		this.folderLabel = folderLabel
 		this.onContinue = onContinue
 		this.intro = intro || 'Öffne eine Noten-PDF oder MuseScore-Datei aus deiner Nextcloud oder wähle einen Ordner mit Noten.'
 		this.startActions = startActions
@@ -136,7 +137,7 @@ export class Reader {
 			el('h2', {}, 'NotenLeser'),
 			el('p', { class: 'nl-intro' }, this.intro),
 			startAction('Noten öffnen', true, () => this.chooseFile()),
-			startAction('Ordner öffnen', false, () => this.chooseFolder()),
+			startAction(this.folderLabel, false, () => this.chooseFolder()),
 			...this.startActions.map(([label, action]) => startAction(label, false, () => action(this))),
 			this.continueButton,
 			el('button', { class: 'nl-link', type: 'button', onclick: () => this.showSettings() }, 'Einstellungen'),

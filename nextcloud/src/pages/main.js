@@ -9,24 +9,32 @@ pdfjs.GlobalWorkerOptions.workerSrc = 'js/pdf.worker.js'
 
 const source = new LocalSource()
 const isAppleMobile = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+// Phones and tablets cannot pick folders with a file input: iOS ignores it, and browsers on Android show a
+// dialog but then deliver no files. There the player picks all scores of a folder at once instead.
+const canPickFolders = LocalSource.folderAccessSupported() || (!isAppleMobile && !/Android/i.test(navigator.userAgent))
 
 /** Opens the browser's file dialog; resolves with the chosen files or null when cancelled. */
-function pickWithInput({ folder }) {
+function pickWithInput({ folder, filter = true }) {
 	return new Promise(resolve => {
 		const input = document.createElement('input')
 		input.type = 'file'
 		input.multiple = true
 		if (folder) input.webkitdirectory = true
-		else input.accept = '.pdf,.mscz,.mscx,application/pdf'
+		// Android knows no file type for MuseScore files, so a filter would grey them out there.
+		else if (filter) input.accept = '.pdf,.mscz,.mscx,application/pdf'
 		input.addEventListener('change', () => resolve(input.files && input.files.length ? [...input.files] : null))
 		input.addEventListener('cancel', () => resolve(null))
 		input.click()
 	})
 }
 
+const isScore = file => /\.(pdf|mscz|mscx)$/i.test(file.name)
+
 async function pickFile() {
-	const files = await pickWithInput({ folder: false })
-	if (!files) return null
+	const picked = await pickWithInput({ folder: false, filter: !/Android/i.test(navigator.userAgent) })
+	if (!picked) return null
+	const files = picked.filter(isScore)
+	if (files.length === 0) throw new Error('Bitte eine PDF- oder MuseScore-Datei auswählen')
 	// All picked files form the folder, so swiping up and down switches between them.
 	source.useFiles(files)
 	await storeRoot(null)
@@ -45,9 +53,14 @@ async function pickFolder() {
 			throw new Error('Ordner konnte nicht geöffnet werden: ' + e.message)
 		}
 	}
-	// iPhone and iPad cannot pick folders; picking several files works the same for reading.
-	const files = await pickWithInput({ folder: !isAppleMobile })
+	// Without folder access, several picked files work the same for reading.
+	const files = await pickWithInput({ folder: canPickFolders, filter: false })
 	if (!files) return null
+	if (!files.some(isScore)) {
+		throw new Error(canPickFolders
+			? 'Der Browser hat keine Noten aus dem Ordner geliefert. Bitte die Noten über „Noten öffnen“ einzeln oder gemeinsam auswählen.'
+			: 'Unter den gewählten Dateien sind keine PDF- oder MuseScore-Dateien')
+	}
 	source.useFiles(files, files[0].webkitRelativePath ? files[0].webkitRelativePath.split('/')[0] : 'Auswahl')
 	await storeRoot(null)
 	return '/'
@@ -80,6 +93,7 @@ async function start() {
 		intro: 'Öffne Noten (PDF oder MuseScore) von deinem Gerät oder wähle einen Ordner mit Noten. Die Dateien bleiben auf deinem Gerät und werden nirgends hochgeladen.',
 		pickFile,
 		pickFolder,
+		folderLabel: canPickFolders ? 'Ordner öffnen' : 'Mehrere Noten öffnen',
 		startActions: [['Beispiel ansehen', openDemo]],
 		onContinue: async () => {
 			try {
