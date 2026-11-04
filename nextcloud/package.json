@@ -1,6 +1,6 @@
 {
   "name": "notenleser-nextcloud",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "private": true,
   "description": "NotenLeser as a Nextcloud app",
   "license": "AGPL-3.0-or-later",
