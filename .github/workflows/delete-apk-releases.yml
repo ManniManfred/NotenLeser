@@ -1,0 +1,21 @@
+# One-off: deletes the releases of the discontinued Android app. Removed again after it has run.
+name: Alte APK-Releases löschen
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  delete:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - run: |
+          for tag in v0.1.0 v0.2.0; do
+            gh release view "$tag" --json assets --jq '.assets[].name'
+            gh release delete "$tag" --yes
+          done
