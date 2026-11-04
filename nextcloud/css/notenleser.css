@@ -132,6 +132,7 @@
 .nl-dialog h3 { margin: 0; padding: 18px 24px 8px; font-size: 20px; font-weight: 600; color: #111; }
 .nl-dialog-content { overflow: auto; padding: 0 24px; flex: 1; min-height: 0; }
 .nl-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 24px 18px; }
+.nl-dialog-actions.nl-inline-actions { justify-content: flex-start; padding: 6px 0 0; }
 .nl-dialog .nl-button { background: #eef0f2; color: #222; border-color: #d5d9de; }
 .nl-dialog .nl-button:hover { background: #e2e6ea; }
 .nl-dialog .nl-button.nl-primary { background: var(--nl-accent); color: #1c160c; }

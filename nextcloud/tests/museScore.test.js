@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { readMuseScore, looksLikeMuseScore, transposeFifths, tpcName } from '../src/core/museScoreReader.js'
 import { ScoreEngraver } from '../src/core/scoreEngraver.js'
-import { Performance } from '../src/core/performance.js'
+import { Performance, scoreParts } from '../src/core/performance.js'
 import { SpannerKind } from '../src/core/musicModel.js'
 import { parseXml, RecordingPainter } from './helpers.js'
 
@@ -112,4 +112,18 @@ test('limits playback to a range of measures', () => {
 	assert.equal(voltas.timeline[0].startMs, 0)
 	assert.ok(voltas.notes.every(n => n.start >= 0 && n.end <= voltas.durationMs + 1))
 	assert.deepEqual(indices(new Performance(score, 1, { first: 9, last: 9 })), [9])
+})
+
+test('limits playback to some parts', () => {
+	const score = readMuseScore(mscx, parseXml)
+	const parts = scoreParts(score)
+	assert.deepEqual(parts.map(p => p.name), ['Horn in F', 'Klavier'])
+	const all = new Performance(score, 1)
+	const horn = new Performance(score, 1, null, { parts: new Set([0]), others: 0 })
+	assert.ok(horn.notes.length > 0 && horn.notes.length < all.notes.length)
+	assert.ok(horn.notes.every(n => n.part === 0))
+	const quiet = new Performance(score, 1, null, { parts: new Set([0]), others: 0.35 })
+	assert.equal(quiet.notes.length, all.notes.length)
+	const piano = quiet.notes.find(n => n.part === 1), loud = all.notes.find(n => n.part === 1)
+	assert.equal(piano.velocity, Math.round(loud.velocity * 0.35))
 })

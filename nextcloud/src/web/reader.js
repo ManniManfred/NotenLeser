@@ -3,9 +3,10 @@ import { looksLikeMuseScore } from '../core/museScoreReader.js'
 import { MUSIC_FONT, MuseScoreDocument } from '../core/museScoreDocument.js'
 import { PdfDocument } from '../core/pdfDocument.js'
 import { ScoreNavigator } from '../core/navigator.js'
+import { scoreParts } from '../core/performance.js'
 import { AudioPlayer } from './audioPlayer.js'
 import { CameraGestures, drawGestureDebug } from './cameraGestures.js'
-import { button, el, FileBrowser, showSettingsDialog } from './ui.js'
+import { button, el, FileBrowser, showPartsDialog, showSettingsDialog } from './ui.js'
 
 const ACCENT = '#c49848'
 const MAX_VOICE = 6
@@ -73,6 +74,7 @@ export class Reader {
 		this.player = null
 		this.range = null // {first, last} measure indices to play
 		this.rangeFirst = null // first measure picked while marking a range, -1 before it is picked
+		this.mix = null // {parts, others} when only some parts are played
 		this.cursorPage = -1; this.cursorSystem = -1
 		this.queue = Promise.resolve()
 		this.pointers = new Map()
@@ -98,6 +100,7 @@ export class Reader {
 		this.info = el('div', { class: 'nl-info' })
 		this.playButton = button('▶', () => this.togglePlayback(), 'Abspielen')
 		this.rangeButton = button('Bereich', () => this.toggleRange(), 'Takte zum Abspielen markieren')
+		this.partsButton = button('Stimmen', () => this.chooseParts(), 'Stimmen zum Abspielen wählen')
 		this.detectionButton = button('System', () => this.toggleDetection())
 		this.editButton = button('Bearbeiten', () => this.toggleEditMode())
 		this.previousButton = button('‹', () => this.run(() => this.previous()), 'Vorherige Seite')
@@ -107,7 +110,7 @@ export class Reader {
 		this.clearButton = button('×', () => this.clearManualSystems(), 'Systeme dieser Seite löschen')
 		this.fullscreenButton = button('⛶', () => this.toggleFullscreen(), 'Vollbild')
 		const tools = el('div', { class: 'nl-tools' }, [
-			this.playButton, this.rangeButton,
+			this.playButton, this.rangeButton, this.partsButton,
 			button('Öffnen', () => this.chooseFile()),
 			this.detectionButton, this.editButton,
 			button('⚙', () => this.showSettings(), 'Einstellungen'),
@@ -168,6 +171,8 @@ export class Reader {
 		this.playButton.title = playing ? 'Wiedergabe beenden' : 'Abspielen'
 		this.playButton.classList.toggle('nl-accent', playing)
 		this.rangeButton.hidden = this.playButton.hidden
+		this.partsButton.hidden = this.playButton.hidden || !this.doc || scoreParts(this.doc.score).length < 2
+		this.partsButton.classList.toggle('nl-accent', !!this.mix)
 		this.rangeButton.classList.toggle('nl-accent', !!this.range || this.rangeFirst !== null)
 		this.rangeButton.textContent = this.rangeFirst !== null ? 'Abbrechen' : this.range ? 'Takt ' + rangeLabel(this.range) : 'Bereich'
 		this.rangeButton.title = this.rangeFirst !== null ? 'Markieren abbrechen' : this.range ? 'Bereich aufheben' : 'Takte zum Abspielen markieren'
@@ -190,7 +195,8 @@ export class Reader {
 		const known = nav.knownSystemCount(nav.page)
 		const count = known ? known : 4
 		const visible = nav.visible.length > 1 ? `${separator}${nav.visible.length} im Bild` : ''
-		const range = this.range ? `${separator}Bereich: Takt ${rangeLabel(this.range)}` : ''
+		const range = (this.range ? `${separator}Bereich: Takt ${rangeLabel(this.range)}` : '')
+			+ (this.mix ? `${separator}${this.mixLabel()}` : '')
 		this.info.textContent = `${pagePosition}${filePosition}${separator}System ${nav.system + 1}/${count}${visible}${known ? '' : ' (Fallback)'}${range}`
 	}
 
@@ -552,6 +558,7 @@ export class Reader {
 		this.nav = null
 		this.range = null
 		this.rangeFirst = null
+		this.mix = null
 		this.pageCache.clear()
 	}
 
@@ -1077,7 +1084,7 @@ export class Reader {
 		if (this.rangeFirst !== null) this.cancelRangeSelection()
 		const startTick = this.doc.systemStartTick(this.nav.page, this.nav.autoDetection ? this.nav.system : 0)
 		try {
-			await this.player.start(Math.max(0, startTick), this.settings.playbackSpeed / 100, () => this.stopPlayback(), this.range)
+			await this.player.start(Math.max(0, startTick), this.settings.playbackSpeed / 100, () => this.stopPlayback(), this.range, this.mix)
 		} catch (e) {
 			this.toast('Wiedergabe nicht möglich: ' + e.message, true)
 			return
@@ -1091,6 +1098,27 @@ export class Reader {
 			this.cursorFrame = requestAnimationFrame(tick)
 		}
 		this.cursorFrame = requestAnimationFrame(tick)
+	}
+
+	// ---- parts to play -----------------------------------------------------------------------------------
+
+	mixLabel() {
+		const names = scoreParts(this.doc.score).filter(p => this.mix.parts.has(p.part)).map(p => p.name)
+		return (names.length === 1 ? 'Stimme: ' : 'Stimmen: ') + names.join(', ') + (this.mix.others > 0 ? ' (andere leise)' : '')
+	}
+
+	/** Lets the player pick the parts to hear; a running playback continues with the new choice. */
+	async chooseParts() {
+		if (!this.player || !this.doc.score) return
+		const score = this.doc.score
+		const own = this.settings.voice > 0 && this.settings.voice <= score.staves.length ? score.staves[this.settings.voice - 1].part : -1
+		const result = await showPartsDialog(this.root, scoreParts(score), this.mix, own)
+		if (!result) return
+		this.mix = result.mix
+		this.updatePlayButton()
+		this.refreshInfo()
+		this.showBanner(this.mix ? this.mixLabel() : 'Alle Stimmen werden abgespielt')
+		if (this.player.playing) { this.stopPlayback(); this.togglePlayback() }
 	}
 
 	// ---- playback range -----------------------------------------------------------------------------------

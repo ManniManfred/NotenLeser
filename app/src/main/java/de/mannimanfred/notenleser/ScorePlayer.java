@@ -55,6 +55,8 @@ final class ScorePlayer {
     private MediaPlayer mediaPlayer;
     private double offsetMs;
     private File midiFile;
+    private Set<Integer> parts;
+    private float others;
 
     ScorePlayer(Score score) {
         this.score = score;
@@ -66,16 +68,20 @@ final class ScorePlayer {
 
     /** Starts playing at a score tick with a tempo factor (1 = as written); onEnd runs on the main thread. */
     void start(Context context, int startTick, float speed, Runnable onEnd) throws IOException {
-        start(context, startTick, speed, onEnd, -1, -1);
+        start(context, startTick, speed, onEnd, -1, -1, null, 0f);
     }
 
     /**
      * Like {@link #start(Context, int, float, Runnable)}; with a range of measure indices (first ≥ 0) only these
      * measures are played, over and over until stopped. The range runs from the first time its first measure is
      * played until its last measure is played and leaves out measures outside it.
+     * With a set of parts (indices as in staff.part; null for all) only these parts are played; the others are
+     * left out (others = 0) or played quieter (others = factor of their velocity).
      */
-    void start(Context context, int startTick, float speed, Runnable onEnd, int first, int last) throws IOException {
+    void start(Context context, int startTick, float speed, Runnable onEnd, int first, int last,
+               Set<Integer> parts, float others) throws IOException {
         stop();
+        this.parts = parts; this.others = others;
         this.speed = Math.max(.25f, Math.min(2f, speed));
         boolean loop = first >= 0;
         timeline = loop ? limit(unfold(), first, last) : unfold();
@@ -254,7 +260,7 @@ final class ScorePlayer {
     }
 
     /** A looped MIDI file ends exactly at the end of the timeline so the next pass follows without a gap. */
-    private byte[] buildMidi(double startMs, boolean loop) {
+    private byte[] buildMidi(double startMs, boolean loop) throws IOException {
         int staffCount = score.staves.size();
         int[] channels = new int[staffCount];
         Map<Integer, Integer> partChannels = new HashMap<>();
@@ -292,6 +298,8 @@ final class ScorePlayer {
         for (Played played : timeline) {
             Measure m = played.measure;
             for (int s = 0; s < staffCount && s < m.staves.size(); s++) {
+                float level = parts != null && !parts.contains(score.staves.get(s).part) ? others : 1f;
+                if (level <= 0) continue;
                 StaffMeasure staffMeasure = m.staves.get(s);
                 List<ChordRest> ordered = new ArrayList<>(staffMeasure.chordRests);
                 Collections.sort(ordered, (a, b) -> Integer.compare(a.tick, b.tick));
@@ -306,6 +314,7 @@ final class ScorePlayer {
                         if (articulation.contains("Accent") || articulation.contains("Marcato")) vel = Math.min(127, vel + 16);
                         if (articulation.contains("Staccato")) staccato = true;
                     }
+                    if (level < 1) vel = Math.max(1, Math.round(vel * level));
                     double length = end - start;
                     double soundEnd = staccato ? start + length * .5 : end - Math.min(25, length * .08);
                     for (Note note : cr.notes) {
@@ -338,6 +347,7 @@ final class ScorePlayer {
 
         ByteArrayOutputStream track = new ByteArrayOutputStream();
         // Tempo of 1,000,000 µs per quarter with 1000 ticks per quarter: one tick per millisecond.
+        if (events.isEmpty() && parts != null) throw new IOException("Die gewählten Stimmen haben hier nichts zu spielen");
         writeVarLen(track, 0); track.write(0xFF); track.write(0x51); track.write(3);
         track.write(0x0F); track.write(0x42); track.write(0x40);
         for (Map.Entry<Integer, Integer> entry : programs.entrySet()) {

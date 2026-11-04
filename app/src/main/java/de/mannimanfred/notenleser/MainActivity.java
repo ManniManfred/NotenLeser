@@ -132,6 +132,10 @@ public class MainActivity extends Activity {
     /** True while the first and last measure of a range are being tapped; pickedMeasure is the first one, or -1. */
     private boolean pickingRange;
     private int pickedMeasure = -1;
+    private TextView partsButton;
+    /** Parts (instruments) to play, or null for all; the others are muted (0) or played quieter. */
+    private Set<Integer> mixParts;
+    private float mixOthers;
     /** Playback tempo in percent of the written tempo. */
     private int playbackSpeed = 100;
     private static final int[] PLAYBACK_SPEEDS = {50, 75, 100, 125};
@@ -367,6 +371,8 @@ public class MainActivity extends Activity {
         addTool(tools, playButton);
         rangeButton = button("Bereich", this::toggleRange);
         addTool(tools, rangeButton);
+        partsButton = button("Stimmen", this::chooseParts);
+        addTool(tools, partsButton);
         addTool(tools, open); addTool(tools, detectionButton); addTool(tools, editButton); addTool(tools, settings);
         addTool(tools, previousButton); addTool(tools, nextButton);
         addTool(tools, undoEditButton); addTool(tools, undoButton); addTool(tools, clearButton);
@@ -615,6 +621,92 @@ public class MainActivity extends Activity {
         rangeButton.setText(pickingRange ? "Abbrechen" : hasRange ? "Takt " + rangeLabel() : "Bereich");
         rangeButton.setContentDescription(pickingRange ? "Markieren abbrechen" : hasRange ? "Bereich aufheben" : "Takte zum Abspielen markieren");
         setButtonAccent(rangeButton, pickingRange || hasRange);
+        if (partsButton == null) return;
+        boolean severalParts = renderer instanceof MuseScoreDocument && scoreParts().size() > 1;
+        partsButton.setVisibility(playButton.getVisibility() == View.VISIBLE && severalParts ? View.VISIBLE : View.GONE);
+        setButtonAccent(partsButton, mixParts != null);
+    }
+
+    /** Parts of the open MuseScore file as {part index, name} in score order; parts without a name are numbered. */
+    private List<Object[]> scoreParts() {
+        List<Object[]> parts = new ArrayList<>();
+        if (!(renderer instanceof MuseScoreDocument)) return parts;
+        Set<Integer> seen = new HashSet<>();
+        for (MusicModel.Staff staff : ((MuseScoreDocument) renderer).score().staves) {
+            if (!seen.add(staff.part)) continue;
+            parts.add(new Object[]{staff.part, staff.name.isEmpty() ? "Stimme " + (parts.size() + 1) : staff.name});
+        }
+        return parts;
+    }
+
+    private String mixLabel() {
+        List<String> names = new ArrayList<>();
+        for (Object[] part : scoreParts()) if (mixParts.contains((Integer) part[0])) names.add((String) part[1]);
+        return (names.size() == 1 ? "Stimme: " : "Stimmen: ") + android.text.TextUtils.join(", ", names)
+                + (mixOthers > 0 ? " (andere leise)" : "");
+    }
+
+    /** Lets the player pick the parts to hear; a running playback continues with the new choice. */
+    private void chooseParts() {
+        if (player == null || !(renderer instanceof MuseScoreDocument)) return;
+        List<Object[]> parts = scoreParts();
+        List<MusicModel.Staff> staves = ((MuseScoreDocument) renderer).score().staves;
+        int ownPart = voice > 0 && voice <= staves.size() ? staves.get(voice - 1).part : -1;
+        LinearLayout content = new LinearLayout(this); content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(dp(24), dp(8), dp(24), 0);
+        TextView hint = new TextView(this); hint.setTextSize(13); hint.setTextColor(Color.rgb(110, 110, 110));
+        hint.setText("Nur die angehakten Stimmen werden abgespielt.");
+        content.addView(hint);
+        List<android.widget.CheckBox> boxes = new ArrayList<>();
+        for (Object[] part : parts) {
+            android.widget.CheckBox box = new android.widget.CheckBox(this);
+            box.setText((String) part[1]); box.setTextSize(15); box.setTag(part[0]);
+            box.setChecked(mixParts == null || mixParts.contains((Integer) part[0]));
+            boxes.add(box); content.addView(box);
+        }
+        LinearLayout quick = new LinearLayout(this);
+        android.widget.Button all = new android.widget.Button(this); all.setText("Alle");
+        all.setOnClickListener(v -> { for (android.widget.CheckBox box : boxes) box.setChecked(true); });
+        quick.addView(all);
+        if (ownPart >= 0) {
+            android.widget.Button own = new android.widget.Button(this); own.setText("Nur meine Stimme");
+            own.setOnClickListener(v -> { for (android.widget.CheckBox box : boxes) box.setChecked((Integer) box.getTag() == ownPart); });
+            quick.addView(own);
+        }
+        content.addView(quick);
+        TextView othersHeading = new TextView(this); othersHeading.setText("Andere Stimmen"); othersHeading.setTextSize(16);
+        othersHeading.setTextColor(Color.rgb(33, 33, 33));
+        othersHeading.setTypeface(android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL));
+        othersHeading.setPadding(0, dp(16), 0, 0);
+        content.addView(othersHeading);
+        android.widget.RadioGroup othersChoice = new android.widget.RadioGroup(this);
+        android.widget.RadioButton mute = new android.widget.RadioButton(this);
+        mute.setId(View.generateViewId()); mute.setText("Stumm"); mute.setTextSize(15);
+        android.widget.RadioButton quiet = new android.widget.RadioButton(this);
+        quiet.setId(View.generateViewId()); quiet.setText("Leise mitspielen"); quiet.setTextSize(15);
+        othersChoice.addView(mute); othersChoice.addView(quiet);
+        othersChoice.check(mixParts != null && mixOthers > 0 ? quiet.getId() : mute.getId());
+        content.addView(othersChoice);
+        android.widget.ScrollView scroll = new android.widget.ScrollView(this);
+        scroll.addView(content);
+        new AlertDialog.Builder(this)
+                .setTitle("Stimmen abspielen")
+                .setView(scroll)
+                .setNegativeButton("Abbrechen", null)
+                .setPositiveButton("Übernehmen", (dialog, which) -> {
+                    Set<Integer> chosen = new HashSet<>();
+                    for (android.widget.CheckBox box : boxes) if (box.isChecked()) chosen.add((Integer) box.getTag());
+                    if (chosen.isEmpty()) {
+                        Toast.makeText(this, "Mindestens eine Stimme auswählen", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    mixParts = chosen.size() == parts.size() ? null : chosen;
+                    mixOthers = othersChoice.getCheckedRadioButtonId() == quiet.getId() ? .35f : 0f;
+                    updatePlayButton();
+                    refreshInfo();
+                    showBanner(mixParts == null ? "Alle Stimmen werden abgespielt" : mixLabel(), false);
+                    if (player.isPlaying()) { stopPlayback(); togglePlayback(); }
+                }).show();
     }
 
     private String rangeLabel() {
@@ -707,7 +799,7 @@ public class MainActivity extends Activity {
         if (pickingRange) { pickingRange = false; pickedMeasure = -1; hideBanner(); renderSystem(); }
         int startTick = score.systemStartTick(pageIndex, autoDetection ? systemIndex : 0);
         try {
-            player.start(this, Math.max(0, startTick), playbackSpeed / 100f, this::stopPlayback, rangeFirst, rangeLast);
+            player.start(this, Math.max(0, startTick), playbackSpeed / 100f, this::stopPlayback, rangeFirst, rangeLast, mixParts, mixOthers);
         } catch (IOException | RuntimeException e) {
             Toast.makeText(this, "Wiedergabe nicht möglich: " + describeCause(e), Toast.LENGTH_LONG).show();
             return;
@@ -1095,6 +1187,8 @@ public class MainActivity extends Activity {
                     return;
                 }
                 stopPlayback();
+                // Ranges and parts refer to the previous file.
+                rangeFirst = -1; rangeLast = -1; pickingRange = false; pickedMeasure = -1; mixParts = null;
                 renderer = loadedRenderer;
                 player = loadedRenderer instanceof MuseScoreDocument ? new ScorePlayer(((MuseScoreDocument) loadedRenderer).score()) : null;
                 updatePlayButton();
@@ -1150,6 +1244,7 @@ public class MainActivity extends Activity {
         stopPlayback();
         player = null;
         rangeFirst = -1; rangeLast = -1; pickingRange = false; pickedMeasure = -1;
+        mixParts = null;
         if (renderer != null) { renderer.close(); renderer = null; }
     }
 
@@ -1881,7 +1976,8 @@ public class MainActivity extends Activity {
         int count = currentSystemCount();
         boolean detected = autoDetection && pageIndex < pageSystems.size() && pageSystems.get(pageIndex) != null && pageSystems.get(pageIndex).count() > 0;
         String visible = visibleSystemCount > 1 ? separator + visibleSystemCount + " im Bild" : "";
-        String range = rangeFirst >= 0 ? separator + "Bereich: Takt " + rangeLabel() : "";
+        String range = (rangeFirst >= 0 ? separator + "Bereich: Takt " + rangeLabel() : "")
+                + (mixParts != null ? separator + mixLabel() : "");
         info.setText(pagePosition + filePosition + separator + "System " + (systemIndex + 1) + "/" + count + visible + (detected ? "" : " (Fallback)") + range);
     }
 

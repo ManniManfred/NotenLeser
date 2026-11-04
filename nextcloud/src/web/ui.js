@@ -152,3 +152,42 @@ export function showSettingsDialog(root, settings, { maxVoice, speeds, version }
 		}, 'Übernehmen'),
 	])
 }
+
+/**
+ * Chooses the parts to play. parts: [{part, name}]; current: {parts: Set, others} or null for all parts;
+ * ownPart: the part of the highlighted own voice or -1. Resolves with {mix} (mix null for all parts),
+ * or null when cancelled.
+ */
+export function showPartsDialog(root, parts, current, ownPart) {
+	const selected = current ? current.parts : new Set(parts.map(p => p.part))
+	const boxes = parts.map(p => el('input', { type: 'checkbox', value: String(p.part), checked: selected.has(p.part) }))
+	const others = current && current.others > 0 ? 'quiet' : 'mute'
+	const form = el('form', { class: 'nl-settings' }, [
+		el('p', { class: 'nl-hint-text' }, 'Nur die angehakten Stimmen werden abgespielt.'),
+		el('div', { class: 'nl-options' }, parts.map((p, i) => el('label', { class: 'nl-option' }, [boxes[i], p.name]))),
+		el('div', { class: 'nl-dialog-actions nl-inline-actions' }, [
+			el('button', { class: 'nl-button', type: 'button', onclick: () => boxes.forEach(b => { b.checked = true }) }, 'Alle'),
+			ownPart >= 0 ? el('button', {
+				class: 'nl-button', type: 'button', onclick: () => boxes.forEach(b => { b.checked = Number(b.value) === ownPart }),
+			}, 'Nur meine Stimme') : null,
+		]),
+		el('h4', {}, 'Andere Stimmen'),
+		el('div', { class: 'nl-options' }, [['mute', 'Stumm'], ['quiet', 'Leise mitspielen']].map(([value, label]) => el('label', { class: 'nl-option' }, [
+			el('input', { type: 'radio', name: 'others', value, checked: value === others }), label,
+		]))),
+	])
+	form.addEventListener('submit', e => e.preventDefault())
+	return dialog(root, 'Stimmen abspielen', form, close => [
+		el('button', { class: 'nl-button', type: 'button', onclick: () => close(null) }, 'Abbrechen'),
+		el('button', {
+			class: 'nl-button nl-primary',
+			type: 'button',
+			onclick: () => {
+				const chosen = new Set(boxes.filter(b => b.checked).map(b => Number(b.value)))
+				if (chosen.size === 0) return
+				if (chosen.size === parts.length) { close({ mix: null }); return }
+				close({ mix: { parts: chosen, others: new FormData(form).get('others') === 'quiet' ? 0.35 : 0 } })
+			},
+		}, 'Übernehmen'),
+	])
+}

@@ -48,13 +48,16 @@ export class AudioPlayer {
 	 * Starts at a score tick with a tempo factor; onEnd runs when the score has finished. With a range
 	 * {first, last} of measure indices only these measures are played, over and over until stopped.
 	 */
-	async start(startTick, speed, onEnd, range = null) {
+	async start(startTick, speed, onEnd, range = null, mix = null) {
 		this.stop()
 		const sameRange = (a, b) => (!a && !b) || (a && b && a.first === b.first && a.last === b.last)
-		if (!this.performance || this.performance.speed !== speed || !sameRange(this.performance.range, range)) {
-			this.performance = new Performance(this.score, speed, range)
+		const sameMix = (a, b) => (!a && !b) || (a && b && a.others === b.others && a.parts.size === b.parts.size && [...a.parts].every(p => b.parts.has(p)))
+		if (!this.performance || this.performance.speed !== speed || !sameRange(this.performance.range, range) || !sameMix(this.performance.mix, mix)) {
+			this.performance = new Performance(this.score, speed, range, mix)
 		}
-		if (this.performance.notes.length === 0) throw new Error(range ? 'Der Bereich enthält nichts zum Abspielen' : 'Die Partitur enthält nichts zum Abspielen')
+		if (this.performance.notes.length === 0) {
+			throw new Error(mix ? 'Die gewählten Stimmen haben hier nichts zu spielen' : range ? 'Der Bereich enthält nichts zum Abspielen' : 'Die Partitur enthält nichts zum Abspielen')
+		}
 		this.loop = !!range
 		if (!this.context) {
 			const AudioContextClass = window.AudioContext || window.webkitAudioContext
