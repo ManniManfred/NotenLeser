@@ -45,7 +45,7 @@ node scripts/build-sounds.mjs /pfad/zu/FluidR3Mono_GM.sf3
 
 ## Installation
 
-Voraussetzung: Nextcloud 30 bis 33.
+Voraussetzung: Nextcloud 30 bis 35.
 
 1. `notenleser-<version>.tar.gz` unter [Releases](https://github.com/ManniManfred/NotenLeser/releases) herunterladen (oder selbst bauen, siehe unten). Eine neue Version entsteht, indem die Versionsnummer in `appinfo/info.xml` und `package.json` erhöht und ein passender Tag `v<version>` gepusht oder unter *Actions → Nextcloud-App → Run workflow* die Versionsnummer eingetragen wird; GitHub Actions legt dann Tag und Release mit dem Paket an.
 2. Archiv in den `apps`- (oder `custom_apps`-)Ordner der Nextcloud entpacken, sodass dort `notenleser/appinfo/info.xml` liegt.

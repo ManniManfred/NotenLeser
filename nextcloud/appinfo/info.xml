@@ -10,7 +10,7 @@
 - MuseScore-Dateien (.mscz, .mscx) werden direkt im Browser gesetzt und lassen sich abspielen.
 - Eigene Stimme hervorheben, mindestens zwei Systeme anzeigen, Blätterpedale (Bluetooth-Tastatur), Wischgesten und Blättern per Handbewegung vor der Kamera.
 - Manuell markierte Systeme werden als `.systems.json` neben der Notendatei gespeichert – im selben Format wie in der Web-App ohne Nextcloud.]]></description>
-	<version>0.3.1</version>
+	<version>0.3.2</version>
 	<licence>agpl</licence>
 	<author mail="manfred.rosskamp@gmx.de">Manfred Rosskamp</author>
 	<namespace>NotenLeser</namespace>
@@ -22,7 +22,7 @@
 	<screenshot>https://raw.githubusercontent.com/ManniManfred/NotenLeser/main/docs/screenshots/pdf-systeme.png</screenshot>
 	<screenshot>https://raw.githubusercontent.com/ManniManfred/NotenLeser/main/docs/screenshots/musescore.png</screenshot>
 	<dependencies>
-		<nextcloud min-version="30" max-version="33"/>
+		<nextcloud min-version="30" max-version="35"/>
 	</dependencies>
 	<navigations>
 		<navigation>
