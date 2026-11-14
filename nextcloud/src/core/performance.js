@@ -3,18 +3,25 @@ import { Annotation, SpannerKind } from './musicModel.js'
 /**
  * Turns a score into timed note events for playback. Repeats and voltas are unfolded; times are milliseconds
  * from the start of the score at the given tempo factor (1 = as written).
+ * An optional range {first, last} of measure indices limits playback to these measures: it runs from the first
+ * time the first measure is played until the last measure is played, leaving out measures outside the range
+ * (e.g. the start of a repeat that lies before it).
+ * An optional mix {parts, others} limits playback to some parts (instruments, indices as in staff.part): the other
+ * parts are left out (others = 0) or played quieter (others = factor of their velocity).
  */
 const DEFAULT_TEMPO = 120
 
 export class Performance {
-	constructor(score, speed = 1) {
+	constructor(score, speed = 1, range = null, mix = null) {
 		this.score = score
 		this.speed = Math.max(0.25, Math.min(2, speed))
+		this.range = range
+		this.mix = mix
 		const entries = [...score.tempos.entries()].sort((a, b) => a[0] - b[0])
 		if (entries.length === 0 || entries[0][0] > 0) entries.unshift([0, entries.length === 0 ? DEFAULT_TEMPO : entries[0][1]])
 		this.tempoTicks = entries.map(e => e[0])
 		this.tempoValues = entries.map(e => e[1])
-		this.timeline = this.unfold()
+		this.timeline = range ? this.limit(this.unfold(), range) : this.unfold()
 		this.notes = this.buildNotes()
 	}
 
@@ -129,6 +136,24 @@ export class Performance {
 		return result
 	}
 
+	/** Keeps the played measures of a range and lays them out one after the other. */
+	limit(timeline, { first, last }) {
+		const index = new Map(this.score.measures.map((m, i) => [m, i]))
+		const begin = timeline.findIndex(p => index.get(p.measure) === first)
+		if (begin < 0) return []
+		const result = []
+		let ms = 0
+		for (let i = begin; i < timeline.length; i++) {
+			const m = timeline[i].measure, at = index.get(m)
+			if (at < first || at > last) continue
+			const length = timeline[i].endMs - timeline[i].startMs
+			result.push({ measure: m, startMs: ms, endMs: ms + length })
+			ms += length
+			if (at === last) break
+		}
+		return result
+	}
+
 	// ---- notes --------------------------------------------------------------------------------------------
 
 	buildNotes() {
@@ -154,6 +179,8 @@ export class Performance {
 			const m = played.measure
 			for (let s = 0; s < staffCount && s < m.staves.length; s++) {
 				const staff = score.staves[s]
+				const level = this.mix && !this.mix.parts.has(staff.part) ? this.mix.others : 1
+				if (level <= 0) continue
 				const ordered = [...m.staves[s].chordRests].sort((a, b) => a.tick - b.tick)
 				const ties = openTies[s]
 				for (const cr of ordered) {
@@ -166,6 +193,7 @@ export class Performance {
 						if (articulation.includes('Accent') || articulation.includes('Marcato')) vel = Math.min(127, vel + 16)
 						if (articulation.includes('Staccato')) staccato = true
 					}
+					if (level < 1) vel = Math.max(1, Math.round(vel * level))
 					const length = end - start
 					const soundEnd = staccato ? start + length * 0.5 : end - Math.min(25, length * 0.08)
 					for (const note of cr.notes) {
@@ -189,6 +217,16 @@ export class Performance {
 		notes.sort((a, b) => a.start - b.start)
 		return notes
 	}
+}
+
+/** Parts of a score as [{part, name}] in score order; parts without a name are numbered. */
+export function scoreParts(score) {
+	const parts = []
+	for (const staff of score.staves) {
+		if (parts.some(p => p.part === staff.part)) continue
+		parts.push({ part: staff.part, name: staff.name || `Stimme ${parts.length + 1}` })
+	}
+	return parts
 }
 
 function velocity(dynamic) {

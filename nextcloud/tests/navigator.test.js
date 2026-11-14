@@ -86,7 +86,7 @@ test('finds the player\'s staff within a system', async () => {
 	assert.equal(await nav.voiceStaff(1, 0.05, 0.25, 0), null)
 })
 
-test('names the sidecar file like the Android app', () => {
+test('names the sidecar file next to the score', () => {
 	assert.equal(sidecarName('Lied.pdf'), 'Lied.systems.json')
 	assert.equal(sidecarName('Lied.PDF'), 'Lied.systems.json')
 	assert.equal(sidecarName('Lied.mscz'), 'Lied.mscz.systems.json')

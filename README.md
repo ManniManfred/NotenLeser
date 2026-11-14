@@ -1,6 +1,6 @@
 # NotenLeser
 
-**Noten im Vollbild lesen und systemweise blättern – für Android, im Browser und in Nextcloud.**
+**Noten im Vollbild lesen und systemweise blättern – im Browser und in Nextcloud.**
 
 NotenLeser zeigt PDF-Noten und MuseScore-Dateien so, dass beim Musizieren immer die nächsten Systeme (Notenzeilen) im Bild sind. Statt ganzer Seiten wird **System für System** geblättert, auch über Seitengrenzen hinweg – per Wischen, Tastatur, Bluetooth-Blätterpedal oder Handbewegung vor der Kamera.
 
@@ -16,27 +16,23 @@ NotenLeser zeigt PDF-Noten und MuseScore-Dateien so, dass beim Musizieren immer 
 - **MuseScore-Dateien** (`.mscz`, `.mscx`, Version 2–4) werden direkt gesetzt, mit der Notenschrift Leland, und lassen sich **abspielen**. Der klingende Takt wird markiert, und es wird automatisch weitergeblättert.
 - **Mehrere Systeme gleichzeitig**, so viele auf den Bildschirm passen; „Immer mindestens 2 Systeme“ zum Vorauslesen.
 - **Eigene Stimme hervorheben:** Die gewählte Notenzeile (1.–6. Stimme) wird in jedem System farbig hinterlegt.
-- **Blättern ohne Hände:** Bluetooth-Pedale (AirTurn, PageFlip u. a.) oder eine Handbewegung vor der Frontkamera. Die Kamerabilder werden nur auf dem Gerät ausgewertet.
+- **Blättern ohne Hände:** Bluetooth-Pedale (AirTurn, PageFlip u. a.) oder eine Handbewegung vor der Frontkamera. Die Kamerabilder werden nur im Browser ausgewertet.
 - **Notenmappe:** Wischen nach oben/unten wechselt zur nächsten Datei im Ordner.
 - **Vollbild**, Display bleibt an.
-- Markierte Systeme werden als `<Name>.systems.json` neben den Noten gespeichert. Das Format ist in allen Versionen gleich, sodass Markierungen z. B. über Nextcloud zwischen Handy und Browser wandern.
+- Markierte Systeme werden als `<Name>.systems.json` neben den Noten gespeichert. Das Format ist in beiden Versionen gleich, sodass Markierungen z. B. über Nextcloud zwischen den Geräten wandern.
 
 ## Versionen
 
 | | Wo | Dateien kommen aus | Details |
 |---|---|---|---|
-| **Android-App** | APK unter [Releases](https://github.com/ManniManfred/NotenLeser/releases) | Android-Dateiauswahl (auch Nextcloud) | [`app/README.md`](app/README.md) |
 | **Web-App** | [mannimanfred.github.io/NotenLeser](https://mannimanfred.github.io/NotenLeser/), installierbar, offline nutzbar | Dateien oder Ordner vom Gerät; nichts wird hochgeladen | [`nextcloud/README.md`](nextcloud/README.md#web-app-ohne-nextcloud-github-pages) |
 | **Nextcloud-App** | eigene Nextcloud (30–33) | Nextcloud-Dateien, Öffnen direkt aus der Dateien-App | [`nextcloud/README.md`](nextcloud/README.md) |
 
-Web-App und Nextcloud-App teilen sich denselben Code (`nextcloud/src/`); die Android-App ist eine eigenständige Java-Implementierung.
+Web-App und Nextcloud-App teilen sich denselben Code (`nextcloud/src/`). Auf Android-Handys lässt sich die Web-App über Chrome zum Startbildschirm hinzufügen und läuft dann wie eine App im Vollbild.
 
 ## Bauen
 
 ```sh
-# Android-APK (Android SDK nötig)
-./gradlew assembleDebug
-
 # Web- und Nextcloud-App (Node.js 24)
 cd nextcloud
 npm ci
@@ -46,7 +42,7 @@ npm run build:pages   # Web-App nach dist-pages/
 npm run package       # Nextcloud-App als build/notenleser-<version>.tar.gz
 ```
 
-GitHub Actions baut bei jedem Tag `v*` die APK als Release ([Anleitung](app/README.md#apk-automatisch-bauen-github-actions)), veröffentlicht die Web-App auf GitHub Pages und baut das Nextcloud-Paket als Artefakt.
+GitHub Actions veröffentlicht die Web-App auf GitHub Pages und baut das Nextcloud-Paket als Artefakt.
 
 ## Mitmachen
 

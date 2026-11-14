@@ -1,4 +1,4 @@
-/* NotenLeser reader. Dark overlays over a black stage, like the Android app. */
+/* NotenLeser reader. Dark overlays over a black stage. */
 #content.app-notenleser { overflow: hidden; }
 
 .nl-root {
@@ -132,6 +132,7 @@
 .nl-dialog h3 { margin: 0; padding: 18px 24px 8px; font-size: 20px; font-weight: 600; color: #111; }
 .nl-dialog-content { overflow: auto; padding: 0 24px; flex: 1; min-height: 0; }
 .nl-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 24px 18px; }
+.nl-dialog-actions.nl-inline-actions { justify-content: flex-start; padding: 6px 0 0; }
 .nl-dialog .nl-button { background: #eef0f2; color: #222; border-color: #d5d9de; }
 .nl-dialog .nl-button:hover { background: #e2e6ea; }
 .nl-dialog .nl-button.nl-primary { background: var(--nl-accent); color: #1c160c; }
@@ -159,6 +160,29 @@
 .nl-file-icon { width: 22px; text-align: center; }
 .nl-file-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .nl-files-note { padding: 16px 8px; color: #777; font-size: 14px; }
+
+.nl-file-check { width: 18px; height: 18px; margin: 0; accent-color: var(--nl-accent-strong); pointer-events: none; flex: none; }
+.nl-field { display: flex; flex-direction: column; gap: 4px; font-size: 14px; color: #444; margin: 4px 0 4px; }
+.nl-root .nl-text {
+	font-size: 16px; padding: 8px 10px; min-height: 40px; margin: 0; width: 100%; box-sizing: border-box;
+	border: 1px solid #c9ced4; border-radius: 8px; background: #fff; color: #111;
+}
+.nl-setlist { list-style: none; margin: 0; padding: 0; }
+.nl-root .nl-setlist-item {
+	width: 100%; display: flex; align-items: center; gap: 8px; box-sizing: border-box;
+	padding: 6px 4px; min-height: 44px; margin: 0;
+	background: none; border: none; border-bottom: 1px solid #eee; border-radius: 0;
+	text-align: left; font-size: 15px; color: #222;
+}
+.nl-root .nl-setlist-play { cursor: pointer; }
+.nl-root .nl-setlist-play:hover { background: #f6f3ee; }
+.nl-root .nl-setlist-play.nl-current { background: #f3ead8; font-weight: 600; }
+.nl-setlist-number { min-width: 28px; text-align: right; color: #8a6420; font-variant-numeric: tabular-nums; }
+.nl-setlist-name { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
+.nl-setlist-name, .nl-setlist-name small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nl-setlist-name small { font-size: 12px; color: #888; font-weight: normal; }
+.nl-root .nl-dialog .nl-button.nl-small { padding: 4px 10px; min-height: 34px; min-width: 36px; margin: 0; }
+.nl-root .nl-dialog .nl-button:disabled { opacity: .4; cursor: default; }
 
 @media (max-width: 480px) {
 	.nl-overlay { top: 8px; left: 8px; max-width: calc(100% - 16px); padding: 10px; }

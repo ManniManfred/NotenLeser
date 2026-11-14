@@ -9,4 +9,5 @@ export const DEFAULT_SETTINGS = {
 	playbackSpeed: 100,
 	lastFile: '',
 	lastFolder: '',
+	lastSetlist: '',
 }

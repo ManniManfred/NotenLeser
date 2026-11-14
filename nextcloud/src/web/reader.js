@@ -3,9 +3,12 @@ import { looksLikeMuseScore } from '../core/museScoreReader.js'
 import { MUSIC_FONT, MuseScoreDocument } from '../core/museScoreDocument.js'
 import { PdfDocument } from '../core/pdfDocument.js'
 import { ScoreNavigator } from '../core/navigator.js'
+import { scoreParts } from '../core/performance.js'
 import { AudioPlayer } from './audioPlayer.js'
+import { SoundBank } from './soundBank.js'
 import { CameraGestures, drawGestureDebug } from './cameraGestures.js'
-import { button, el, FileBrowser, showSettingsDialog } from './ui.js'
+import { isSetlistFileName, parseSetlist, serializeSetlist, setlistFileName, setlistTitle } from '../core/setlist.js'
+import { button, el, FileBrowser, showPartsDialog, showSetlistEditor, showSetlistMenu, showSettingsDialog } from './ui.js'
 
 const ACCENT = '#c49848'
 const MAX_VOICE = 6
@@ -18,7 +21,7 @@ const parentOf = path => path.substring(0, path.lastIndexOf('/')) || '/'
 const baseName = path => path.substring(path.lastIndexOf('/') + 1)
 const joinPath = (folder, name) => (folder === '/' ? '' : folder) + '/' + name
 
-/** Name of the file with manually marked systems; only PDFs drop their extension, like in the Android app. */
+/** Name of the file with manually marked systems; only PDFs drop their extension (as files from older versions do). */
 export function sidecarName(fileName) {
 	return fileName.replace(/\.pdf$/i, '') + '.systems.json'
 }
@@ -29,12 +32,16 @@ export function sidecarName(fileName) {
  *   settings: settings store (load, save)
  *   pdfjs:    the pdf.js module
  *   fontUrl:  URL of the Leland music font
+ *   soundUrl: address of a sampled instrument by name (optional; without it playback is synthesized)
  *   version:  app version shown on the start page and in the settings
+ *   setlists: offer setlists ("Zusammenstellungen"); needs a source that can write files
+ *   onFileChange(path, setlistPath): called after a score was opened, setlistPath is null outside a setlist
  */
 export class Reader {
 	constructor(root, {
-		source, settings, pdfjs, fontUrl, version, onFileChange, bare = false, bareUrl = null, homeUrl = null,
-		pickFile = null, pickFolder = null, onContinue = null, intro = null, startActions = [],
+		source, settings, pdfjs, fontUrl, soundUrl = null, version, onFileChange, bare = false, bareUrl = null, homeUrl = null,
+		pickFile = null, pickFolder = null, folderLabel = 'Ordner öffnen', onContinue = null, intro = null, startActions = [],
+		setlists = false,
 	}) {
 		this.root = root
 		this.source = source
@@ -42,6 +49,7 @@ export class Reader {
 		this.settings = settings.load()
 		this.pdfjs = pdfjs
 		this.fontUrl = fontUrl
+		this.soundBank = soundUrl ? new SoundBank(soundUrl) : null
 		this.version = version
 		this.onFileChange = onFileChange || (() => {})
 		// Header-less mode (bare) and how to get there or back, for browsers without a fullscreen mode.
@@ -51,9 +59,14 @@ export class Reader {
 		// Optional replacements for the built-in file browser, e.g. the device's own file picker.
 		this.pickFile = pickFile
 		this.pickFolder = pickFolder
+		this.folderLabel = folderLabel
 		this.onContinue = onContinue
 		this.intro = intro || 'Öffne eine Noten-PDF oder MuseScore-Datei aus deiner Nextcloud oder wähle einen Ordner mit Noten.'
 		this.startActions = startActions
+		this.setlistsEnabled = setlists
+		// The open setlist {path, title, files: [paths]}; while it is open, it replaces the folder of the score.
+		this.setlist = null
+		this.lastBrowsed = null
 		this.doc = null
 		this.nav = null
 		this.path = null
@@ -71,6 +84,9 @@ export class Reader {
 		this.zoom = 1; this.panX = 0; this.panY = 0
 		this.shownParts = []
 		this.player = null
+		this.range = null // {first, last} measure indices to play
+		this.rangeFirst = null // first measure picked while marking a range, -1 before it is picked
+		this.mix = null // {parts, others} when only some parts are played
 		this.cursorPage = -1; this.cursorSystem = -1
 		this.queue = Promise.resolve()
 		this.pointers = new Map()
@@ -95,6 +111,8 @@ export class Reader {
 		this.titleView = el('div', { class: 'nl-title' })
 		this.info = el('div', { class: 'nl-info' })
 		this.playButton = button('▶', () => this.togglePlayback(), 'Abspielen')
+		this.rangeButton = button('Bereich', () => this.toggleRange(), 'Takte zum Abspielen markieren')
+		this.partsButton = button('Stimmen', () => this.chooseParts(), 'Stimmen zum Abspielen wählen')
 		this.detectionButton = button('System', () => this.toggleDetection())
 		this.editButton = button('Bearbeiten', () => this.toggleEditMode())
 		this.previousButton = button('‹', () => this.run(() => this.previous()), 'Vorherige Seite')
@@ -103,9 +121,11 @@ export class Reader {
 		this.removeButton = button('−', () => this.removeManualSystem(), 'Ausgewähltes System entfernen')
 		this.clearButton = button('×', () => this.clearManualSystems(), 'Systeme dieser Seite löschen')
 		this.fullscreenButton = button('⛶', () => this.toggleFullscreen(), 'Vollbild')
+		this.setlistButton = this.setlistsEnabled ? button('☰', () => this.setlistMenu(), 'Zusammenstellung') : null
 		const tools = el('div', { class: 'nl-tools' }, [
-			this.playButton,
+			this.playButton, this.rangeButton, this.partsButton,
 			button('Öffnen', () => this.chooseFile()),
+			this.setlistButton,
 			this.detectionButton, this.editButton,
 			button('⚙', () => this.showSettings(), 'Einstellungen'),
 			this.bare && this.homeUrl ? button('⌂', () => this.goHome(), 'Zurück zu Nextcloud') : null,
@@ -120,14 +140,16 @@ export class Reader {
 		this.continueButton.addEventListener('click', async () => {
 			const path = this.settings.lastFile
 			if (this.onContinue && !(await this.onContinue(path))) return
-			this.openFile(path)
+			if (this.setlistsEnabled && this.settings.lastSetlist) this.openSetlist(this.settings.lastSetlist, path)
+			else this.openFile(path)
 		})
 		this.startPage = el('div', { class: 'nl-start' }, [
 			el('div', { class: 'nl-emblem' }, '♫'),
 			el('h2', {}, 'NotenLeser'),
 			el('p', { class: 'nl-intro' }, this.intro),
 			startAction('Noten öffnen', true, () => this.chooseFile()),
-			startAction('Ordner öffnen', false, () => this.chooseFolder()),
+			startAction(this.folderLabel, false, () => this.chooseFolder()),
+			this.setlistsEnabled ? startAction('Zusammenstellung', false, () => this.setlistMenu()) : null,
 			...this.startActions.map(([label, action]) => startAction(label, false, () => action(this))),
 			this.continueButton,
 			el('button', { class: 'nl-link', type: 'button', onclick: () => this.showSettings() }, 'Einstellungen'),
@@ -155,7 +177,11 @@ export class Reader {
 		this.updatePlayButton()
 		const continuable = this.settings.lastFile && !this.doc
 		this.continueButton.hidden = !continuable
-		if (continuable) this.continueButton.textContent = 'Weiterlesen: ' + baseName(this.settings.lastFile)
+		if (continuable) {
+			const setlist = this.setlistsEnabled && this.settings.lastSetlist
+			this.continueButton.textContent = 'Weiterlesen: ' + baseName(this.settings.lastFile) + (setlist ? ` (${setlistTitle(setlist)})` : '')
+		}
+		if (this.setlistButton) this.setlistButton.classList.toggle('nl-accent', !!this.setlist)
 	}
 
 	updatePlayButton() {
@@ -164,6 +190,12 @@ export class Reader {
 		this.playButton.textContent = playing ? '■' : '▶'
 		this.playButton.title = playing ? 'Wiedergabe beenden' : 'Abspielen'
 		this.playButton.classList.toggle('nl-accent', playing)
+		this.rangeButton.hidden = this.playButton.hidden
+		this.partsButton.hidden = this.playButton.hidden || !this.doc || scoreParts(this.doc.score).length < 2
+		this.partsButton.classList.toggle('nl-accent', !!this.mix)
+		this.rangeButton.classList.toggle('nl-accent', !!this.range || this.rangeFirst !== null)
+		this.rangeButton.textContent = this.rangeFirst !== null ? 'Abbrechen' : this.range ? 'Takt ' + rangeLabel(this.range) : 'Bereich'
+		this.rangeButton.title = this.rangeFirst !== null ? 'Markieren abbrechen' : this.range ? 'Bereich aufheben' : 'Takte zum Abspielen markieren'
 	}
 
 	refreshInfo() {
@@ -172,7 +204,7 @@ export class Reader {
 		if (!this.doc) { this.overlay.hidden = true; this.info.textContent = ''; return }
 		const nav = this.nav
 		const separator = '  ·  '
-		const filePosition = this.folderIndex >= 0 ? `${separator}Datei ${this.folderIndex + 1}/${this.folderFiles.length}` : ''
+		const filePosition = this.folderIndex >= 0 ? separator + this.positionLabel() : ''
 		const pagePosition = `Seite ${nav.page + 1}/${this.doc.pageCount}`
 		if (!nav.autoDetection) {
 			const marked = this.manualRanges(nav.page).length
@@ -183,7 +215,9 @@ export class Reader {
 		const known = nav.knownSystemCount(nav.page)
 		const count = known ? known : 4
 		const visible = nav.visible.length > 1 ? `${separator}${nav.visible.length} im Bild` : ''
-		this.info.textContent = `${pagePosition}${filePosition}${separator}System ${nav.system + 1}/${count}${visible}${known ? '' : ' (Fallback)'}`
+		const range = (this.range ? `${separator}Bereich: Takt ${rangeLabel(this.range)}` : '')
+			+ (this.mix ? `${separator}${this.mixLabel()}` : '')
+		this.info.textContent = `${pagePosition}${filePosition}${separator}System ${nav.system + 1}/${count}${visible}${known ? '' : ' (Fallback)'}${range}`
 	}
 
 	showControls() {
@@ -342,7 +376,10 @@ export class Reader {
 			this.run(() => (dx < 0 ? this.next() : this.previous()))
 		} else if (Math.abs(dy) > Math.max(64, height * 0.15) && Math.abs(dy) > Math.abs(dx) * 1.3) {
 			this.switchFile(dy < 0 ? 1 : -1)
-		} else if (tap) this.toggleControls()
+		} else if (tap) {
+			if (this.rangeFirst !== null) this.pickRangeMeasure(point)
+			else this.toggleControls()
+		}
 	}
 
 	onWheel(e) {
@@ -397,8 +434,11 @@ export class Reader {
 	}
 
 	/** Shows the built-in file browser for the current source. */
-	browse(mode, start = '/') {
-		return new FileBrowser(this.root, this.source, { mode, start, filter: isScoreFileName }).open()
+	async browse(mode, start = '/', options = {}) {
+		const browser = new FileBrowser(this.root, this.source, { mode, start, filter: isScoreFileName, ...options })
+		const result = await browser.open()
+		this.lastBrowsed = browser.path
+		return result
 	}
 
 	async chooseFolder() {
@@ -439,34 +479,44 @@ export class Reader {
 		return files
 	}
 
-	/** Opens the next (1) or previous (-1) score of the folder. */
+	/** "Datei 2/5" in a folder, "Konzert: Lied 2/5" in a setlist. */
+	positionLabel(separator = '/') {
+		const position = `${this.folderIndex + 1}${separator}${this.folderFiles.length}`
+		return this.setlist ? `${this.setlist.title}: Lied ${position}` : `Datei ${position}`
+	}
+
+	/** Opens the next (1) or previous (-1) score of the folder or setlist. */
 	switchFile(direction, startAtEnd = false) {
 		if (this.folderIndex < 0 || this.folderFiles.length === 0) {
-			this.showBanner('Der Ordner der Datei wird noch geladen')
+			this.showBanner(this.setlist ? 'Die Datei gehört nicht zur Zusammenstellung' : 'Der Ordner der Datei wird noch geladen')
 			return false
 		}
 		const target = this.folderIndex + direction
 		if (target < 0 || target >= this.folderFiles.length) {
-			this.showBanner(direction > 0 ? 'Letzte Datei im Ordner' : 'Erste Datei im Ordner')
+			if (this.setlist) this.showBanner(direction > 0 ? 'Letztes Lied der Zusammenstellung' : 'Erstes Lied der Zusammenstellung')
+			else this.showBanner(direction > 0 ? 'Letzte Datei im Ordner' : 'Erste Datei im Ordner')
 			return false
 		}
 		this.canvas.style.transition = 'transform 180ms, opacity 180ms'
 		this.canvas.style.transform = `translateY(${-direction * 8}%)`
 		this.canvas.style.opacity = '0'
 		this.switchDirection = direction
-		this.openFile(this.folderFiles[target].path, startAtEnd)
+		this.openFile(this.folderFiles[target].path, startAtEnd, target)
 		return true
 	}
 
-	async openFile(path, startAtEnd = false) {
+	/** Opens a score; position is its index in the open setlist, as a score may appear there more than once. */
+	async openFile(path, startAtEnd = false, position = -1) {
 		if (!path) return
 		const token = ++this.openToken
 		// Must happen right away: browsers only allow fullscreen shortly after a click or key press.
 		if (this.settings.autoFullscreen) this.enterFullscreen(true)
 		const folder = parentOf(path)
 		const name = baseName(path)
-		const index = this.folder === folder ? this.folderFiles.findIndex(f => f.path === path) : -1
-		this.showBanner(index >= 0 ? `Datei ${index + 1} / ${this.folderFiles.length} wird geladen …` : `${name} wird geladen …`, true)
+		const setlist = this.setlist
+		const setlistIndex = !setlist ? -1 : setlist.files[position] === path ? position : setlist.files.indexOf(path)
+		const index = setlist ? setlistIndex : this.folder === folder ? this.folderFiles.findIndex(f => f.path === path) : -1
+		this.showBanner(index >= 0 ? `${setlist ? 'Lied' : 'Datei'} ${index + 1} / ${this.folderFiles.length} wird geladen …` : `${name} wird geladen …`, true)
 		try {
 			const data = await this.source.read(path)
 			const doc = await this.createDocument(data, name)
@@ -484,26 +534,137 @@ export class Reader {
 			this.nav.twoSystemsMinimum = this.settings.twoSystemsMinimum
 			this.updateViewport()
 			if (startAtEnd) await this.nav.goToEnd()
-			this.player = doc.kind === 'musescore' ? new AudioPlayer(doc.score) : null
+			this.player = doc.kind === 'musescore' ? new AudioPlayer(doc.score, this.soundBank) : null
+			if (this.player) this.player.onLoading = () => this.showBanner('Instrumente werden geladen …', true)
 			this.updateToolButtons()
 			this.showControls()
 			await this.render()
 			this.revealScore()
-			this.onFileChange(path)
-			this.saveSettings({ lastFile: path, lastFolder: folder })
+			// A score from outside the setlist ends it and brings back its folder.
+			if (this.setlist && (this.setlist !== setlist || setlistIndex < 0)) this.setlist = null
+			this.onFileChange(path, this.setlist ? this.setlist.path : null)
+			this.saveSettings({ lastFile: path, lastFolder: folder, ...(this.setlistsEnabled ? { lastSetlist: this.setlist ? this.setlist.path : '' } : {}) })
 			this.updateWakeLock()
-			if (this.folder !== folder) {
+			if (this.setlist) this.folderIndex = setlistIndex
+			else if (this.folder !== folder) {
 				this.folder = folder; this.folderFiles = []; this.folderIndex = -1
 				this.loadFolder(folder).then(() => this.refreshInfo()).catch(() => {})
 			} else this.folderIndex = this.folderFiles.findIndex(f => f.path === path)
 			this.refreshInfo()
-			this.showBanner(this.folderIndex >= 0 ? `${name}\nDatei ${this.folderIndex + 1} / ${this.folderFiles.length}` : name)
+			this.showBanner(this.folderIndex >= 0 ? `${name}\n${this.positionLabel(' / ')}` : name)
 		} catch (e) {
 			if (token !== this.openToken) return
 			console.error(e)
 			this.hideBanner()
 			this.revealScore()
 			this.toast('Lesefehler: ' + e.message, true)
+		}
+	}
+
+	// ---- setlists ------------------------------------------------------------------------------------------
+
+	/** Opens a setlist file, starting with `file` if it belongs to it, otherwise with its first score. */
+	async openSetlist(path, file = null) {
+		let setlist
+		try {
+			const text = await this.source.readText(path)
+			if (text === null) throw new Error('Zusammenstellung nicht gefunden')
+			setlist = { path, ...parseSetlist(text, path) }
+		} catch (e) {
+			this.toast(e.message, true)
+			if (this.settings.lastSetlist === path) this.saveSettings({ lastSetlist: '' })
+			return false
+		}
+		this.useSetlist(setlist)
+		if (setlist.files.length === 0) { this.toast('Die Zusammenstellung ist noch leer'); this.editSetlist(); return true }
+		const position = file ? setlist.files.indexOf(file) : -1
+		this.openFile(setlist.files[Math.max(position, 0)], false, Math.max(position, 0))
+		return true
+	}
+
+	useSetlist(setlist, position = -1) {
+		this.setlist = setlist
+		this.folder = null
+		this.folderFiles = setlist.files.map(path => ({ name: baseName(path), path }))
+		this.folderIndex = !this.doc ? -1 : setlist.files[position] === this.path ? position : setlist.files.indexOf(this.path)
+		this.updateToolButtons()
+		this.refreshInfo()
+	}
+
+	/** Ends the setlist; the open score stays and its folder is used again. */
+	leaveSetlist() {
+		if (!this.setlist) return
+		const title = this.setlist.title
+		this.setlist = null
+		this.folder = null; this.folderFiles = []; this.folderIndex = -1
+		this.saveSettings({ lastSetlist: '' })
+		if (this.path && this.doc) {
+			this.onFileChange(this.path, null)
+			const folder = parentOf(this.path)
+			this.folder = folder
+			this.loadFolder(folder).then(() => this.refreshInfo()).catch(() => {})
+		}
+		this.refreshInfo()
+		this.toast(`Zusammenstellung „${title}“ beendet`)
+	}
+
+	async setlistMenu() {
+		const result = await showSetlistMenu(this.root, this.setlist, this.folderIndex)
+		if (!result) return
+		if (result.play !== undefined) { this.openFile(this.setlist.files[result.play], false, result.play); return }
+		if (result.action === 'edit') this.editSetlist()
+		else if (result.action === 'new') this.createSetlist()
+		else if (result.action === 'open') this.chooseSetlist()
+		else if (result.action === 'close') this.leaveSetlist()
+	}
+
+	async chooseSetlist() {
+		const start = this.setlist ? parentOf(this.setlist.path) : this.lastBrowsed || this.folder || this.settings.lastFolder || '/'
+		const path = await this.browse('file', start, { filter: isSetlistFileName, title: 'Zusammenstellung öffnen' })
+		if (path) this.openSetlist(path)
+	}
+
+	/** Starts a new setlist, optionally with the given scores (e.g. chosen in the Files app). */
+	createSetlist(files = []) { return this.editSetlist(true, files) }
+
+	async editSetlist(isNew = false, files = []) {
+		if (!isNew && !this.setlist) return
+		const start = isNew ? { title: '', files } : this.setlist
+		const result = await showSetlistEditor(this.root, start, {
+			isNew,
+			current: this.doc ? this.path : null,
+			addFiles: () => this.browse('files', this.lastBrowsed || this.folder || this.settings.lastFolder || '/'),
+		})
+		if (!result) return
+		let path = isNew ? null : this.setlist.path
+		try {
+			if (!path) {
+				const startFolder = (files[0] && parentOf(files[0])) || this.folder || this.settings.lastFolder || '/'
+				const folder = await this.browse('folder', startFolder, { title: 'Speicherort der Zusammenstellung', confirmLabel: 'Hier speichern' })
+				if (!folder) { this.toast('Zusammenstellung nicht gespeichert'); return }
+				path = await this.freeSetlistPath(folder, result.title)
+			}
+			await this.source.write(path, serializeSetlist(result.title, result.files, path))
+		} catch (e) {
+			this.toast('Zusammenstellung konnte nicht gespeichert werden: ' + e.message, true)
+			return
+		}
+		const position = this.setlist && this.setlist.files[this.folderIndex] === this.path && result.files[this.folderIndex] === this.path ? this.folderIndex : -1
+		this.useSetlist({ path, title: result.title, files: result.files }, position)
+		this.toast(`„${result.title}“ gespeichert`)
+		if (this.folderIndex >= 0) {
+			this.onFileChange(this.path, path)
+			this.saveSettings({ lastSetlist: path })
+		} else this.openFile(result.files[0], false, 0)
+	}
+
+	/** A path for a new setlist in the folder that does not overwrite an existing file. */
+	async freeSetlistPath(folder, title) {
+		const name = setlistFileName(title)
+		const stem = name.substring(0, name.length - '.setlist.json'.length)
+		for (let i = 1; ; i++) {
+			const path = joinPath(folder, i === 1 ? name : `${stem} (${i}).setlist.json`)
+			if (i > 50 || (await this.source.readText(path)) === null) return path
 		}
 	}
 
@@ -539,6 +700,9 @@ export class Reader {
 		try { if (this.doc) this.doc.close() } catch (e) { console.warn(e) }
 		this.doc = null
 		this.nav = null
+		this.range = null
+		this.rangeFirst = null
+		this.mix = null
 		this.pageCache.clear()
 	}
 
@@ -692,6 +856,7 @@ export class Reader {
 		if (!this.doc || !this.frame) return
 		if (this.nav.autoDetection) this.drawSystems()
 		else this.drawPage()
+		this.drawRange()
 		this.updatePlaybackCursor(false)
 	}
 
@@ -914,7 +1079,7 @@ export class Reader {
 		if (!this.doc) { this.toast('Bitte zuerst Noten öffnen'); return }
 		this.editMode = !this.editMode
 		this.nav.autoDetection = !this.editMode
-		if (this.editMode) this.stopPlayback()
+		if (this.editMode) { this.stopPlayback(); this.rangeFirst = null; this.hideBanner() }
 		this.zoom = 1; this.panX = 0; this.panY = 0
 		this.selected = null
 		this.nav.system = 0
@@ -1060,13 +1225,18 @@ export class Reader {
 	async togglePlayback() {
 		if (!this.player || this.doc.kind !== 'musescore') return
 		if (this.player.playing) { this.stopPlayback(); return }
+		if (this.rangeFirst !== null) this.cancelRangeSelection()
 		const startTick = this.doc.systemStartTick(this.nav.page, this.nav.autoDetection ? this.nav.system : 0)
 		try {
-			await this.player.start(Math.max(0, startTick), this.settings.playbackSpeed / 100, () => this.stopPlayback())
+			await this.player.start(Math.max(0, startTick), this.settings.playbackSpeed / 100, () => this.stopPlayback(), this.range, this.mix)
 		} catch (e) {
+			this.hideBanner()
 			this.toast('Wiedergabe nicht möglich: ' + e.message, true)
 			return
 		}
+		// Loading the instruments may have taken a moment; the player could have been stopped meanwhile.
+		if (this.banner.textContent.startsWith('Instrumente')) this.hideBanner()
+		if (!this.player || !this.player.playing) return
 		this.cursorPage = -1; this.cursorSystem = -1
 		this.updatePlayButton()
 		this.hideControls()
@@ -1076,6 +1246,108 @@ export class Reader {
 			this.cursorFrame = requestAnimationFrame(tick)
 		}
 		this.cursorFrame = requestAnimationFrame(tick)
+	}
+
+	// ---- parts to play -----------------------------------------------------------------------------------
+
+	mixLabel() {
+		const names = scoreParts(this.doc.score).filter(p => this.mix.parts.has(p.part)).map(p => p.name)
+		return (names.length === 1 ? 'Stimme: ' : 'Stimmen: ') + names.join(', ') + (this.mix.others > 0 ? ' (andere leise)' : '')
+	}
+
+	/** Lets the player pick the parts to hear; a running playback continues with the new choice. */
+	async chooseParts() {
+		if (!this.player || !this.doc.score) return
+		const score = this.doc.score
+		const own = this.settings.voice > 0 && this.settings.voice <= score.staves.length ? score.staves[this.settings.voice - 1].part : -1
+		const result = await showPartsDialog(this.root, scoreParts(score), this.mix, own)
+		if (!result) return
+		this.mix = result.mix
+		this.updatePlayButton()
+		this.refreshInfo()
+		this.showBanner(this.mix ? this.mixLabel() : 'Alle Stimmen werden abgespielt')
+		if (this.player.playing) { this.stopPlayback(); this.togglePlayback() }
+	}
+
+	// ---- playback range -----------------------------------------------------------------------------------
+
+	/** Starts marking a range, cancels marking, or removes the marked range. */
+	toggleRange() {
+		if (!this.player || this.editMode) return
+		if (this.rangeFirst !== null) { this.cancelRangeSelection(); return }
+		if (this.range) {
+			if (this.player.playing) this.stopPlayback()
+			this.range = null
+			this.toast('Bereich aufgehoben – ▶ spielt wieder ab dem obersten System')
+			this.afterRangeChange()
+			return
+		}
+		this.stopPlayback()
+		this.rangeFirst = -1
+		this.showBanner('Ersten Takt des Bereichs antippen', true)
+		this.afterRangeChange()
+	}
+
+	cancelRangeSelection() {
+		this.rangeFirst = null
+		this.hideBanner()
+		this.afterRangeChange()
+	}
+
+	afterRangeChange() {
+		this.updatePlayButton()
+		this.refreshInfo()
+		this.draw()
+	}
+
+	/** Measure under a point of the canvas, or -1. */
+	measureAtPoint(point) {
+		const part = this.shownParts.find(p => point.x >= p.x && point.x <= p.x + p.width && point.y >= p.y && point.y <= p.y + p.height)
+		if (!part || !this.doc.measureAt) return -1
+		const yRatio = part.top + (point.y - part.y) / part.height * (part.bottom - part.top)
+		return this.doc.measureAt(part.page, (point.x - part.x) / part.width, yRatio)
+	}
+
+	/** Takes a tapped measure as the first or last measure of the range; swiping in between turns pages. */
+	pickRangeMeasure(point) {
+		const measure = this.measureAtPoint(point)
+		if (measure < 0) return
+		if (this.rangeFirst < 0) {
+			this.rangeFirst = measure
+			this.showBanner(`Takt ${measure + 1} – jetzt letzten Takt antippen`, true)
+			this.draw()
+			return
+		}
+		this.range = { first: Math.min(this.rangeFirst, measure), last: Math.max(this.rangeFirst, measure) }
+		this.rangeFirst = null
+		this.showBanner(`Takt ${rangeLabel(this.range)}\n▶ spielt den Bereich in Schleife`)
+		this.afterRangeChange()
+		this.showControls()
+	}
+
+	/** Tints the marked measures, or the first measure while a range is being marked. */
+	drawRange() {
+		const range = this.rangeFirst !== null && this.rangeFirst >= 0 ? { first: this.rangeFirst, last: this.rangeFirst } : this.range
+		if (!range || !this.doc.measureBoxes || this.editMode) return
+		const c = this.canvas.getContext('2d')
+		for (const part of this.shownParts) {
+			for (const box of this.doc.measureBoxes(part.page, range.first, range.last)) {
+				const middle = (box.top + box.bottom) / 2
+				if (middle < part.top || middle > part.bottom) continue
+				const scaleY = part.height / (part.bottom - part.top)
+				const top = part.y + (Math.max(part.top, box.top) - part.top) * scaleY
+				const bottom = part.y + (Math.min(part.bottom, box.bottom) - part.top) * scaleY
+				const left = part.x + box.left * part.width, right = part.x + box.right * part.width
+				c.save()
+				c.globalCompositeOperation = 'multiply'
+				c.fillStyle = '#c9f0cf'
+				c.fillRect(left, top, right - left, bottom - top)
+				c.restore()
+				c.strokeStyle = 'rgba(38,150,72,.85)'
+				c.lineWidth = 2
+				c.strokeRect(left, top, right - left, bottom - top)
+			}
+		}
 	}
 
 	stopPlayback() {
@@ -1185,6 +1457,10 @@ function pedalDirection(key) {
 	default:
 		return 0
 	}
+}
+
+function rangeLabel(range) {
+	return range.first === range.last ? `${range.first + 1}` : `${range.first + 1}–${range.last + 1}`
 }
 
 function startAction(label, primary, action) {
