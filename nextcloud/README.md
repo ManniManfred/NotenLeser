@@ -52,6 +52,32 @@ Voraussetzung: Nextcloud 30 bis 35.
 2. Archiv in den `apps`- (oder `custom_apps`-)Ordner der Nextcloud entpacken, sodass dort `notenleser/appinfo/info.xml` liegt.
 3. App aktivieren: `occ app:enable notenleser` oder unter „Apps → Deaktivierte Apps“.
 
+### Automatisch aktualisieren (Docker, CapRover, Nextcloud AIO)
+
+Läuft Nextcloud in Docker, installiert und aktualisiert `scripts/update-docker.sh` die App. Das Skript läuft auf dem Docker-Host, holt das neueste Release von GitHub (mit Prüfsumme), kopiert es per `docker cp` nach `custom_apps/notenleser` im Container und führt `occ upgrade` bzw. `occ app:enable` aus. Ist die neueste Version schon installiert, tut es nichts. Der Server braucht dafür keinen Zugang von außen und GitHub keine Zugangsdaten.
+
+Einmalig auf dem Server (als root bzw. mit Zugriff auf Docker):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/ManniManfred/NotenLeser/main/nextcloud/scripts/update-docker.sh \
+  -o /usr/local/bin/notenleser-update
+chmod +x /usr/local/bin/notenleser-update
+
+notenleser-update --caprover nextcloud            # CapRover: Name der App im CapRover-Dashboard
+notenleser-update --container nextcloud-aio-nextcloud   # Nextcloud AIO
+notenleser-update --container nextcloud-app-1     # Docker Compose: Name aus `docker ps`
+```
+
+Für tägliche Updates per Cron (`crontab -e`), z. B. nachts um 4:17 Uhr:
+
+```
+17 4 * * * /usr/local/bin/notenleser-update --caprover nextcloud >> /var/log/notenleser-update.log 2>&1
+```
+
+Weitere Optionen: `--version 0.3.2` installiert eine bestimmte Version, `--force` installiert dieselbe Version noch einmal. Ältere Versionen lassen sich nicht installieren, weil Nextcloud Apps nicht zurückstufen kann.
+
+Bei CapRover bekommt der Container bei jedem Neustart einen neuen Namen (`srv-captain--<App>.1.…`); das Skript sucht ihn deshalb jedes Mal neu. Die App liegt im Volume für `/var/www/html` und bleibt bei einem Update des Nextcloud-Images erhalten.
+
 ## Entwicklung
 
 ```sh
