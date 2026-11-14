@@ -20,6 +20,7 @@ class SettingsService {
 		'playbackSpeed' => ['int', 100, [50, 75, 100, 125]],
 		'lastFile' => ['string', '', null],
 		'lastFolder' => ['string', '', null],
+		'lastSetlist' => ['string', '', null],
 	];
 
 	public function __construct(

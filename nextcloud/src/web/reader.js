@@ -7,7 +7,8 @@ import { scoreParts } from '../core/performance.js'
 import { AudioPlayer } from './audioPlayer.js'
 import { SoundBank } from './soundBank.js'
 import { CameraGestures, drawGestureDebug } from './cameraGestures.js'
-import { button, el, FileBrowser, showPartsDialog, showSettingsDialog } from './ui.js'
+import { isSetlistFileName, parseSetlist, serializeSetlist, setlistFileName, setlistTitle } from '../core/setlist.js'
+import { button, el, FileBrowser, showPartsDialog, showSetlistEditor, showSetlistMenu, showSettingsDialog } from './ui.js'
 
 const ACCENT = '#c49848'
 const MAX_VOICE = 6
@@ -33,11 +34,14 @@ export function sidecarName(fileName) {
  *   fontUrl:  URL of the Leland music font
  *   soundUrl: address of a sampled instrument by name (optional; without it playback is synthesized)
  *   version:  app version shown on the start page and in the settings
+ *   setlists: offer setlists ("Zusammenstellungen"); needs a source that can write files
+ *   onFileChange(path, setlistPath): called after a score was opened, setlistPath is null outside a setlist
  */
 export class Reader {
 	constructor(root, {
 		source, settings, pdfjs, fontUrl, soundUrl = null, version, onFileChange, bare = false, bareUrl = null, homeUrl = null,
 		pickFile = null, pickFolder = null, folderLabel = 'Ordner öffnen', onContinue = null, intro = null, startActions = [],
+		setlists = false,
 	}) {
 		this.root = root
 		this.source = source
@@ -59,6 +63,10 @@ export class Reader {
 		this.onContinue = onContinue
 		this.intro = intro || 'Öffne eine Noten-PDF oder MuseScore-Datei aus deiner Nextcloud oder wähle einen Ordner mit Noten.'
 		this.startActions = startActions
+		this.setlistsEnabled = setlists
+		// The open setlist {path, title, files: [paths]}; while it is open, it replaces the folder of the score.
+		this.setlist = null
+		this.lastBrowsed = null
 		this.doc = null
 		this.nav = null
 		this.path = null
@@ -113,9 +121,11 @@ export class Reader {
 		this.removeButton = button('−', () => this.removeManualSystem(), 'Ausgewähltes System entfernen')
 		this.clearButton = button('×', () => this.clearManualSystems(), 'Systeme dieser Seite löschen')
 		this.fullscreenButton = button('⛶', () => this.toggleFullscreen(), 'Vollbild')
+		this.setlistButton = this.setlistsEnabled ? button('☰', () => this.setlistMenu(), 'Zusammenstellung') : null
 		const tools = el('div', { class: 'nl-tools' }, [
 			this.playButton, this.rangeButton, this.partsButton,
 			button('Öffnen', () => this.chooseFile()),
+			this.setlistButton,
 			this.detectionButton, this.editButton,
 			button('⚙', () => this.showSettings(), 'Einstellungen'),
 			this.bare && this.homeUrl ? button('⌂', () => this.goHome(), 'Zurück zu Nextcloud') : null,
@@ -130,7 +140,8 @@ export class Reader {
 		this.continueButton.addEventListener('click', async () => {
 			const path = this.settings.lastFile
 			if (this.onContinue && !(await this.onContinue(path))) return
-			this.openFile(path)
+			if (this.setlistsEnabled && this.settings.lastSetlist) this.openSetlist(this.settings.lastSetlist, path)
+			else this.openFile(path)
 		})
 		this.startPage = el('div', { class: 'nl-start' }, [
 			el('div', { class: 'nl-emblem' }, '♫'),
@@ -138,6 +149,7 @@ export class Reader {
 			el('p', { class: 'nl-intro' }, this.intro),
 			startAction('Noten öffnen', true, () => this.chooseFile()),
 			startAction(this.folderLabel, false, () => this.chooseFolder()),
+			this.setlistsEnabled ? startAction('Zusammenstellung', false, () => this.setlistMenu()) : null,
 			...this.startActions.map(([label, action]) => startAction(label, false, () => action(this))),
 			this.continueButton,
 			el('button', { class: 'nl-link', type: 'button', onclick: () => this.showSettings() }, 'Einstellungen'),
@@ -165,7 +177,11 @@ export class Reader {
 		this.updatePlayButton()
 		const continuable = this.settings.lastFile && !this.doc
 		this.continueButton.hidden = !continuable
-		if (continuable) this.continueButton.textContent = 'Weiterlesen: ' + baseName(this.settings.lastFile)
+		if (continuable) {
+			const setlist = this.setlistsEnabled && this.settings.lastSetlist
+			this.continueButton.textContent = 'Weiterlesen: ' + baseName(this.settings.lastFile) + (setlist ? ` (${setlistTitle(setlist)})` : '')
+		}
+		if (this.setlistButton) this.setlistButton.classList.toggle('nl-accent', !!this.setlist)
 	}
 
 	updatePlayButton() {
@@ -188,7 +204,7 @@ export class Reader {
 		if (!this.doc) { this.overlay.hidden = true; this.info.textContent = ''; return }
 		const nav = this.nav
 		const separator = '  ·  '
-		const filePosition = this.folderIndex >= 0 ? `${separator}Datei ${this.folderIndex + 1}/${this.folderFiles.length}` : ''
+		const filePosition = this.folderIndex >= 0 ? separator + this.positionLabel() : ''
 		const pagePosition = `Seite ${nav.page + 1}/${this.doc.pageCount}`
 		if (!nav.autoDetection) {
 			const marked = this.manualRanges(nav.page).length
@@ -418,8 +434,11 @@ export class Reader {
 	}
 
 	/** Shows the built-in file browser for the current source. */
-	browse(mode, start = '/') {
-		return new FileBrowser(this.root, this.source, { mode, start, filter: isScoreFileName }).open()
+	async browse(mode, start = '/', options = {}) {
+		const browser = new FileBrowser(this.root, this.source, { mode, start, filter: isScoreFileName, ...options })
+		const result = await browser.open()
+		this.lastBrowsed = browser.path
+		return result
 	}
 
 	async chooseFolder() {
@@ -460,34 +479,44 @@ export class Reader {
 		return files
 	}
 
-	/** Opens the next (1) or previous (-1) score of the folder. */
+	/** "Datei 2/5" in a folder, "Konzert: Lied 2/5" in a setlist. */
+	positionLabel(separator = '/') {
+		const position = `${this.folderIndex + 1}${separator}${this.folderFiles.length}`
+		return this.setlist ? `${this.setlist.title}: Lied ${position}` : `Datei ${position}`
+	}
+
+	/** Opens the next (1) or previous (-1) score of the folder or setlist. */
 	switchFile(direction, startAtEnd = false) {
 		if (this.folderIndex < 0 || this.folderFiles.length === 0) {
-			this.showBanner('Der Ordner der Datei wird noch geladen')
+			this.showBanner(this.setlist ? 'Die Datei gehört nicht zur Zusammenstellung' : 'Der Ordner der Datei wird noch geladen')
 			return false
 		}
 		const target = this.folderIndex + direction
 		if (target < 0 || target >= this.folderFiles.length) {
-			this.showBanner(direction > 0 ? 'Letzte Datei im Ordner' : 'Erste Datei im Ordner')
+			if (this.setlist) this.showBanner(direction > 0 ? 'Letztes Lied der Zusammenstellung' : 'Erstes Lied der Zusammenstellung')
+			else this.showBanner(direction > 0 ? 'Letzte Datei im Ordner' : 'Erste Datei im Ordner')
 			return false
 		}
 		this.canvas.style.transition = 'transform 180ms, opacity 180ms'
 		this.canvas.style.transform = `translateY(${-direction * 8}%)`
 		this.canvas.style.opacity = '0'
 		this.switchDirection = direction
-		this.openFile(this.folderFiles[target].path, startAtEnd)
+		this.openFile(this.folderFiles[target].path, startAtEnd, target)
 		return true
 	}
 
-	async openFile(path, startAtEnd = false) {
+	/** Opens a score; position is its index in the open setlist, as a score may appear there more than once. */
+	async openFile(path, startAtEnd = false, position = -1) {
 		if (!path) return
 		const token = ++this.openToken
 		// Must happen right away: browsers only allow fullscreen shortly after a click or key press.
 		if (this.settings.autoFullscreen) this.enterFullscreen(true)
 		const folder = parentOf(path)
 		const name = baseName(path)
-		const index = this.folder === folder ? this.folderFiles.findIndex(f => f.path === path) : -1
-		this.showBanner(index >= 0 ? `Datei ${index + 1} / ${this.folderFiles.length} wird geladen …` : `${name} wird geladen …`, true)
+		const setlist = this.setlist
+		const setlistIndex = !setlist ? -1 : setlist.files[position] === path ? position : setlist.files.indexOf(path)
+		const index = setlist ? setlistIndex : this.folder === folder ? this.folderFiles.findIndex(f => f.path === path) : -1
+		this.showBanner(index >= 0 ? `${setlist ? 'Lied' : 'Datei'} ${index + 1} / ${this.folderFiles.length} wird geladen …` : `${name} wird geladen …`, true)
 		try {
 			const data = await this.source.read(path)
 			const doc = await this.createDocument(data, name)
@@ -511,21 +540,131 @@ export class Reader {
 			this.showControls()
 			await this.render()
 			this.revealScore()
-			this.onFileChange(path)
-			this.saveSettings({ lastFile: path, lastFolder: folder })
+			// A score from outside the setlist ends it and brings back its folder.
+			if (this.setlist && (this.setlist !== setlist || setlistIndex < 0)) this.setlist = null
+			this.onFileChange(path, this.setlist ? this.setlist.path : null)
+			this.saveSettings({ lastFile: path, lastFolder: folder, ...(this.setlistsEnabled ? { lastSetlist: this.setlist ? this.setlist.path : '' } : {}) })
 			this.updateWakeLock()
-			if (this.folder !== folder) {
+			if (this.setlist) this.folderIndex = setlistIndex
+			else if (this.folder !== folder) {
 				this.folder = folder; this.folderFiles = []; this.folderIndex = -1
 				this.loadFolder(folder).then(() => this.refreshInfo()).catch(() => {})
 			} else this.folderIndex = this.folderFiles.findIndex(f => f.path === path)
 			this.refreshInfo()
-			this.showBanner(this.folderIndex >= 0 ? `${name}\nDatei ${this.folderIndex + 1} / ${this.folderFiles.length}` : name)
+			this.showBanner(this.folderIndex >= 0 ? `${name}\n${this.positionLabel(' / ')}` : name)
 		} catch (e) {
 			if (token !== this.openToken) return
 			console.error(e)
 			this.hideBanner()
 			this.revealScore()
 			this.toast('Lesefehler: ' + e.message, true)
+		}
+	}
+
+	// ---- setlists ------------------------------------------------------------------------------------------
+
+	/** Opens a setlist file, starting with `file` if it belongs to it, otherwise with its first score. */
+	async openSetlist(path, file = null) {
+		let setlist
+		try {
+			const text = await this.source.readText(path)
+			if (text === null) throw new Error('Zusammenstellung nicht gefunden')
+			setlist = { path, ...parseSetlist(text, path) }
+		} catch (e) {
+			this.toast(e.message, true)
+			if (this.settings.lastSetlist === path) this.saveSettings({ lastSetlist: '' })
+			return false
+		}
+		this.useSetlist(setlist)
+		if (setlist.files.length === 0) { this.toast('Die Zusammenstellung ist noch leer'); this.editSetlist(); return true }
+		const position = file ? setlist.files.indexOf(file) : -1
+		this.openFile(setlist.files[Math.max(position, 0)], false, Math.max(position, 0))
+		return true
+	}
+
+	useSetlist(setlist, position = -1) {
+		this.setlist = setlist
+		this.folder = null
+		this.folderFiles = setlist.files.map(path => ({ name: baseName(path), path }))
+		this.folderIndex = !this.doc ? -1 : setlist.files[position] === this.path ? position : setlist.files.indexOf(this.path)
+		this.updateToolButtons()
+		this.refreshInfo()
+	}
+
+	/** Ends the setlist; the open score stays and its folder is used again. */
+	leaveSetlist() {
+		if (!this.setlist) return
+		const title = this.setlist.title
+		this.setlist = null
+		this.folder = null; this.folderFiles = []; this.folderIndex = -1
+		this.saveSettings({ lastSetlist: '' })
+		if (this.path && this.doc) {
+			this.onFileChange(this.path, null)
+			const folder = parentOf(this.path)
+			this.folder = folder
+			this.loadFolder(folder).then(() => this.refreshInfo()).catch(() => {})
+		}
+		this.refreshInfo()
+		this.toast(`Zusammenstellung „${title}“ beendet`)
+	}
+
+	async setlistMenu() {
+		const result = await showSetlistMenu(this.root, this.setlist, this.folderIndex)
+		if (!result) return
+		if (result.play !== undefined) { this.openFile(this.setlist.files[result.play], false, result.play); return }
+		if (result.action === 'edit') this.editSetlist()
+		else if (result.action === 'new') this.createSetlist()
+		else if (result.action === 'open') this.chooseSetlist()
+		else if (result.action === 'close') this.leaveSetlist()
+	}
+
+	async chooseSetlist() {
+		const start = this.setlist ? parentOf(this.setlist.path) : this.lastBrowsed || this.folder || this.settings.lastFolder || '/'
+		const path = await this.browse('file', start, { filter: isSetlistFileName, title: 'Zusammenstellung öffnen' })
+		if (path) this.openSetlist(path)
+	}
+
+	/** Starts a new setlist, optionally with the given scores (e.g. chosen in the Files app). */
+	createSetlist(files = []) { return this.editSetlist(true, files) }
+
+	async editSetlist(isNew = false, files = []) {
+		if (!isNew && !this.setlist) return
+		const start = isNew ? { title: '', files } : this.setlist
+		const result = await showSetlistEditor(this.root, start, {
+			isNew,
+			current: this.doc ? this.path : null,
+			addFiles: () => this.browse('files', this.lastBrowsed || this.folder || this.settings.lastFolder || '/'),
+		})
+		if (!result) return
+		let path = isNew ? null : this.setlist.path
+		try {
+			if (!path) {
+				const startFolder = (files[0] && parentOf(files[0])) || this.folder || this.settings.lastFolder || '/'
+				const folder = await this.browse('folder', startFolder, { title: 'Speicherort der Zusammenstellung', confirmLabel: 'Hier speichern' })
+				if (!folder) { this.toast('Zusammenstellung nicht gespeichert'); return }
+				path = await this.freeSetlistPath(folder, result.title)
+			}
+			await this.source.write(path, serializeSetlist(result.title, result.files, path))
+		} catch (e) {
+			this.toast('Zusammenstellung konnte nicht gespeichert werden: ' + e.message, true)
+			return
+		}
+		const position = this.setlist && this.setlist.files[this.folderIndex] === this.path && result.files[this.folderIndex] === this.path ? this.folderIndex : -1
+		this.useSetlist({ path, title: result.title, files: result.files }, position)
+		this.toast(`„${result.title}“ gespeichert`)
+		if (this.folderIndex >= 0) {
+			this.onFileChange(this.path, path)
+			this.saveSettings({ lastSetlist: path })
+		} else this.openFile(result.files[0], false, 0)
+	}
+
+	/** A path for a new setlist in the folder that does not overwrite an existing file. */
+	async freeSetlistPath(folder, title) {
+		const name = setlistFileName(title)
+		const stem = name.substring(0, name.length - '.setlist.json'.length)
+		for (let i = 1; ; i++) {
+			const path = joinPath(folder, i === 1 ? name : `${stem} (${i}).setlist.json`)
+			if (i > 50 || (await this.source.readText(path)) === null) return path
 		}
 	}
 

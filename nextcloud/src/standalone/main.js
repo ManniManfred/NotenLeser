@@ -16,12 +16,16 @@ const reader = new Reader(document.getElementById('notenleser'), {
 	bare: new URL(location.href).searchParams.get('bare') === '1',
 	bareUrl: path => '?bare=1' + (path ? '&file=' + encodeURIComponent(path) : ''),
 	homeUrl: path => '?' + (path ? 'file=' + encodeURIComponent(path) : ''),
-	onFileChange: path => {
+	setlists: true,
+	onFileChange: (path, setlist) => {
 		const url = new URL(location.href)
 		url.searchParams.set('file', path)
+		if (setlist) url.searchParams.set('setlist', setlist)
+		else url.searchParams.delete('setlist')
 		history.replaceState(null, '', url)
 	},
 })
 window.notenleser = reader
-const file = new URL(location.href).searchParams.get('file')
-if (file) reader.openFile(file)
+const params = new URL(location.href).searchParams
+if (params.get('setlist')) reader.openSetlist(params.get('setlist'), params.get('file'))
+else if (params.get('file')) reader.openFile(params.get('file'))
